@@ -1,6 +1,6 @@
-name: "Vocera Scenario Runner"
-description: "Run scenarios against Vocera agents"
-author: "Vocera AI"
+name: "Cekura Scenario Runner"
+description: "Run scenarios against Cekura agents"
+author: "Cekura AI"
 
 inputs:
   agent_id:

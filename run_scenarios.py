@@ -8,7 +8,7 @@ class ScenarioRunner:
                  frequency: int = 1, timeout: int = 3600, poll_interval: int = 30):
         self.base_url = base_url.rstrip('/')
         self.headers = {
-            'X-VOCERA-API-KEY': api_key,
+            'X-CEKURA-API-KEY': api_key,
             'Content-Type': 'application/json'
         }
         self.agent_id = agent_id

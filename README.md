@@ -209,16 +209,9 @@ For a comprehensive guide on GitHub Actions with Cekura, including:
 
 Visit our documentation: **[GitHub Actions Tutorial](https://docs.cekura.ai/guides/github-actions-ci-cd)**
 
-## Support
-
-- **Documentation**: https://docs.cekura.ai
-- **Issues**: Open an issue in this repository
-- **Email**: support@cekura.ai
-
 ## License
 
 This project is licensed under the MIT License.
-
 ---
 
 © 2024 Cekura AI. All rights reserved.

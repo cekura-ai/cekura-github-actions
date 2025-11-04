@@ -248,13 +248,13 @@ permissions:
 
 ## Complete Documentation
 
-For a comprehensive guide on GitHub Actions CI/CD with Cekura, including:
+For a comprehensive guide on GitHub Actions with Cekura, including:
 - Detailed workflow setup instructions
 - GitHub secrets configuration
 - Advanced patterns and best practices
 - Complete troubleshooting guide
 
-Visit our documentation: **[GitHub Actions CI/CD Guide](https://docs.cekura.ai/guides/github-actions-ci-cd)**
+Visit our documentation: **[GitHub Actions Tutorial](https://docs.cekura.ai/guides/github-actions-ci-cd)**
 
 ## Support
 

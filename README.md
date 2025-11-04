@@ -1,260 +1,213 @@
-# Cekura GitHub Actions - Scenario Runner
+# Cekura GitHub Actions
 
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Ready-blue?logo=github-actions)](https://github.com/cekura-ai/vocera-github-actions)
 [![Documentation](https://img.shields.io/badge/Documentation-Available-green?logo=gitbook)](https://docs.cekura.ai/guides/github-actions-ci-cd)
 
-Run automated test scenarios against Cekura agents directly from your GitHub workflows. This repository provides reusable workflows and examples for integrating Cekura scenario testing into your CI/CD pipeline.
+Automate your agent testing by integrating Cekura with GitHub Actions. This repository provides a reusable workflow for running Cekura test scenarios in your CI/CD pipeline.
 
 ## Features
 
-- **Multiple Trigger Types**: Manual runs, automatic PR testing, or label-based triggers
-- **Flexible Configuration**: Use workflow inputs or repository secrets
-- **Easy Integration**: Simple Python script with minimal dependencies
-- **Workflow Examples**: Ready-to-use templates for common use cases
+- **Reusable Workflow**: Simple integration using GitHub's reusable workflow pattern
+- **Flexible Testing**: Support for scenario IDs, tags, or both
+- **Multiple Triggers**: Manual runs, PR testing, scheduled runs, or push events
+- **Phone Number Support**: Test outbound calling scenarios
+- **Configurable**: Customize frequency, timeout, and API endpoint
 
 ## Quick Start
 
-### 1. Set Up Repository Secrets
+### 1. Set Up Repository Secrets & Variables
 
-Go to your repository **Settings** → **Secrets and variables** → **Actions** and add:
+Go to your repository **Settings** → **Secrets and variables** → **Actions**:
 
-| Secret Name | Description | Required |
-|------------|-------------|----------|
-| `API_BASE_URL` | Your Cekura API base URL | Yes |
-| `API_KEY` | Your Cekura API key | Yes |
-| `AGENT_ID` | Default agent ID (optional if using manual trigger) | No |
-| `SCENARIOS` | Default scenario IDs, comma-separated (optional) | No |
+**Add Secret:**
+- `CEKURA_API_KEY` - Your Cekura API key
 
-### 2. Copy Files to Your Repository
+**Add Variables:**
+- `AGENT_ID` - Your agent ID (required)
+- `SCENARIO_IDS` - Comma-separated scenario IDs (e.g., `123,456,789`) OR
+- `TAGS` - Comma-separated tags (e.g., `smoke-test,critical`)
+- `PHONE_NUMBER` - (Optional) Outbound phone number for testing
 
-Copy the following files from this repository to yours:
+### 2. Create Workflow File
 
-```bash
-# Copy the Python script
-curl -o run_scenarios.py https://raw.githubusercontent.com/cekura-ai/vocera-github-actions/main/run_scenarios.py
-
-# Copy requirements
-curl -o requirements.txt https://raw.githubusercontent.com/cekura-ai/vocera-github-actions/main/requirements.txt
-
-# Create workflows directory
-mkdir -p .github/workflows
-
-# Copy workflow examples
-curl -o .github/workflows/run-scenarios.yml https://raw.githubusercontent.com/cekura-ai/vocera-github-actions/main/.github/workflows/run-scenarios.yml
-```
-
-## Usage Examples
-
-### Method 1: Manual Trigger
-
-Run scenarios on-demand from the GitHub Actions UI.
-
-The `run-scenarios.yml` workflow in this repo supports manual triggering. To use it:
-
-1. Go to **Actions** → **Run Scenarios** → **Run workflow**
-2. Enter your agent ID and scenario IDs
-3. Click **Run workflow**
-
-### Method 2: Automatic on Pull Request
-
-Automatically run scenarios when PRs are opened or updated.
-
-The `run-scenarios.yml` workflow automatically runs on PR events. Make sure you have `AGENT_ID` and `SCENARIOS` configured in your repository secrets.
+Create `.github/workflows/test-agents.yml` in your repository:
 
 ```yaml
-# Triggers automatically on:
-# - PR opened
-# - PR synchronized (new commits)
-# - PR reopened
-```
-
-### Method 3: Label-Based Trigger
-
-Run scenarios by adding a label to a PR.
-
-Simply add the label `run-scenarios` to any PR, and the workflow will trigger automatically.
-
-```yaml
-# The workflow detects when a label is added
-# Just add 'run-scenarios' label to your PR
-```
-
-### Method 4: Post-Deployment Testing
-
-Run scenarios after deploying your application.
-
-See `.github/workflows/deploy.yml` for an example:
-
-```yaml
-name: Deploy and Test
+name: Agent Tests
 
 on:
   push:
     branches: [main]
+  pull_request:
+    types:
+      - opened
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Deploy
-      run: ./deploy.sh
-
-  run-scenarios:
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
-    - name: Install dependencies
-      run: pip install -r requirements.txt
-    - name: Run scenarios
-      env:
-        API_BASE_URL: ${{ secrets.API_BASE_URL }}
-        API_KEY: ${{ secrets.API_KEY }}
-        AGENT_ID: ${{ secrets.AGENT_ID }}
-        SCENARIOS: ${{ secrets.SCENARIOS }}
-        FREQUENCY: "1"
-        TIMEOUT: "1800"
-      run: python run_scenarios.py
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      tags: ${{ vars.TAGS }}
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
 ```
 
-## Configuration
+### 3. Trigger and Monitor
 
-### Environment Variables
+Make a change and raise a pull request. The workflow will run automatically, and you can monitor results on [dashboard.cekura.ai](https://dashboard.cekura.ai) in the Results section.
 
-The `run_scenarios.py` script uses the following environment variables:
+## Usage Examples
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `API_BASE_URL` | Cekura API base URL | Yes | - |
-| `API_KEY` | Cekura API key for authentication | Yes | - |
-| `AGENT_ID` | Agent ID to run scenarios against | Yes | - |
-| `SCENARIOS` | Comma-separated scenario IDs | Yes | - |
-| `FREQUENCY` | Number of times to run each scenario | No | 1 |
-| `TIMEOUT` | Timeout in seconds | No | 3600 |
-| `POLL_INTERVAL` | Polling interval in seconds | No | 30 |
-
-### Workflow Inputs vs Secrets
-
-The main workflow supports both manual inputs and secrets:
-
-- **Manual inputs** (workflow_dispatch): Used when running manually from GitHub UI
-- **Repository secrets**: Used for automatic triggers (PR, labels, scheduled runs)
-- **Fallback**: Manual inputs take precedence over secrets
-
-## Advanced Usage
-
-### Using in Other Repositories
-
-You can reference the Python script from this repository:
+### Using Scenario IDs
 
 ```yaml
-- name: Download and run scenarios
-  env:
-    API_BASE_URL: ${{ secrets.API_BASE_URL }}
-    API_KEY: ${{ secrets.API_KEY }}
-    AGENT_ID: "your-agent-id"
-    SCENARIOS: "123,456,789"
-  run: |
-    curl -o run_scenarios.py https://raw.githubusercontent.com/cekura-ai/vocera-github-actions/main/run_scenarios.py
-    pip install requests
-    python run_scenarios.py
+jobs:
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      scenario_ids: ${{ vars.SCENARIO_IDS }}
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
 ```
 
-### Customizing Triggers
-
-Modify the `on:` section in your workflow to customize triggers:
+### Using Tags
 
 ```yaml
+jobs:
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      tags: ${{ vars.TAGS }}
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+```
+
+### Using Both Tags and Scenario IDs
+
+```yaml
+jobs:
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      tags: ${{ vars.TAGS }}
+      scenario_ids: ${{ vars.SCENARIO_IDS }}
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+```
+
+### Testing with Phone Numbers
+
+```yaml
+jobs:
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      scenario_ids: ${{ vars.SCENARIO_IDS }}
+      phone_number: ${{ vars.PHONE_NUMBER }}
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+```
+
+### Manual Trigger
+
+```yaml
+name: Agent Tests
+
 on:
-  # Run on schedule (nightly at 2 AM)
-  schedule:
-    - cron: '0 2 * * *'
+  workflow_dispatch:
 
-  # Run on specific branches
-  push:
-    branches:
-      - main
-      - staging
-
-  # Run on release
-  release:
-    types: [created]
+jobs:
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      tags: ${{ vars.TAGS }}
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
 ```
 
-### Multiple Agents or Scenario Sets
+Then trigger from the Actions tab → Run workflow button.
 
-Create separate workflow files for different test suites:
+### Scheduled Testing
 
 ```yaml
-# .github/workflows/smoke-tests.yml
-name: Smoke Tests
-env:
-  AGENT_ID: "smoke-test-agent"
-  SCENARIOS: "1,2,3"
+name: Nightly Tests
 
-# .github/workflows/regression-tests.yml
-name: Regression Tests
-env:
-  AGENT_ID: "regression-agent"
-  SCENARIOS: "10,20,30,40,50"
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Run at 2 AM daily
+
+jobs:
+  test:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.AGENT_ID }}
+      tags: 'regression'
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
 ```
+
+### Environment-Specific Testing
+
+```yaml
+jobs:
+  test-staging:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.STAGING_AGENT_ID }}
+      tags: 'smoke-test'
+      api_url: 'https://staging-api.cekura.ai'
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.STAGING_API_KEY }}
+
+  test-production:
+    uses: cekura-ai/vocera-github-actions/.github/workflows/cekura_run_tests.yml@main
+    with:
+      agent_id: ${{ vars.PROD_AGENT_ID }}
+      tags: 'smoke-test'
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.PROD_API_KEY }}
+```
+
+## Workflow Inputs
+
+The reusable workflow accepts these inputs:
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `agent_id` | Agent ID to test | Yes | - |
+| `scenario_ids` | Comma-separated scenario IDs (e.g., `123,456,789`) | No* | - |
+| `tags` | Comma-separated tags (e.g., `smoke-test,critical`) | No* | - |
+| `phone_number` | Outbound phone number for testing | No | - |
+| `api_url` | Cekura API URL | No | `https://api.cekura.ai` |
+| `frequency` | Run each scenario N times | No | `1` |
+| `timeout` | Timeout in seconds | No | `3600` |
+
+*Either `scenario_ids` or `tags` must be provided (or both)
 
 ## Files in This Repository
 
 | File | Description |
 |------|-------------|
-| `run_scenarios.py` | Python script that runs Cekura scenarios |
-| `requirements.txt` | Python dependencies |
-| `.github/workflows/run-scenarios.yml` | Main workflow supporting multiple triggers |
-| `.github/workflows/deploy.yml` | Example deployment workflow with scenario testing |
+| `.github/workflows/cekura_run_tests.yml` | Reusable workflow for running Cekura tests |
+| `run_scenarios.py` | Python script (legacy, kept for backward compatibility) |
+| `requirements.txt` | Python dependencies (legacy) |
 | `action.yml` | Composite action metadata |
 | `README.md` | This file |
 
-## Troubleshooting
-
-### Workflow Not Triggering
-
-- Ensure workflow file is in `.github/workflows/` directory
-- Check YAML syntax is correct
-- Verify trigger conditions match your event
-- For label triggers, ensure the label name matches exactly
-
-### Authentication Errors
-
-- Verify `API_BASE_URL` and `API_KEY` secrets are set correctly
-- Check secret names are exactly as specified (case-sensitive)
-- Ensure API key has necessary permissions
-
-### Scenarios Failing
-
-- Check scenario IDs are correct and comma-separated
-- Verify agent ID exists and is accessible
-- Review workflow logs for detailed error messages
-- Ensure timeout is sufficient for your scenarios
-
-### Permission Denied
-
-Add permissions to your workflow if needed:
-
-```yaml
-permissions:
-  contents: read
-  pull-requests: write  # For PR comments
-```
-
 ## Complete Documentation
 
-For a comprehensive guide on GitHub Actions CI/CD with Cekura, including:
-- Detailed workflow setup instructions
-- GitHub secrets configuration
+For a comprehensive guide on GitHub Actions with Cekura, including:
+- Step-by-step setup tutorial
+- GitHub secrets and variables configuration
 - Advanced patterns and best practices
 - Complete troubleshooting guide
 
-Visit our documentation: **[GitHub Actions CI/CD Guide](https://docs.cekura.ai/guides/github-actions-ci-cd)**
+Visit our documentation: **[GitHub Actions Tutorial](https://docs.cekura.ai/guides/github-actions-ci-cd)**
 
 ## Support
 

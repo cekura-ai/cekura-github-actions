@@ -187,7 +187,29 @@ jobs:
               echo "Test execution completed successfully"
               echo "=========================================="
               echo ""
-              echo "View detailed results at: https://dashboard.cekura.ai/"
+
+              # Extract and display summary
+              TOTAL_DURATION=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_duration', 'N/A'))")
+              TOTAL_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_runs_count', 0))")
+              COMPLETED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('completed_runs_count', 0))")
+              SUCCESS_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('success_runs_count', 0))")
+              FAILED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('failed_runs_count', 0))")
+              SUCCESS_RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f\"{data.get('success_rate', 0):.1f}\")")
+
+              echo "Summary:"
+              echo ""
+              echo "  Total Duration: $TOTAL_DURATION"
+              echo "  Total Runs: $TOTAL_RUNS"
+              echo "  Completed: $COMPLETED_RUNS"
+              echo "  Success: $SUCCESS_RUNS"
+              echo "  Failed: $FAILED_RUNS"
+              echo "  Success Rate: ${SUCCESS_RATE}%"
+              echo ""
+
+              echo "Scenarios:"
+              echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
+              echo ""
+
               exit 0
             elif [ "$STATUS" = "failed" ]; then
               echo ""
@@ -195,7 +217,29 @@ jobs:
               echo "Test execution failed"
               echo "=========================================="
               echo ""
-              echo "View detailed results at: https://dashboard.cekura.ai/"
+
+              # Extract and display summary
+              TOTAL_DURATION=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_duration', 'N/A'))")
+              TOTAL_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_runs_count', 0))")
+              COMPLETED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('completed_runs_count', 0))")
+              SUCCESS_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('success_runs_count', 0))")
+              FAILED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('failed_runs_count', 0))")
+              SUCCESS_RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f\"{data.get('success_rate', 0):.1f}\")")
+
+              echo "Summary:"
+              echo ""
+              echo "  Total Duration: $TOTAL_DURATION"
+              echo "  Total Runs: $TOTAL_RUNS"
+              echo "  Completed: $COMPLETED_RUNS"
+              echo "  Success: $SUCCESS_RUNS"
+              echo "  Failed: $FAILED_RUNS"
+              echo "  Success Rate: ${SUCCESS_RATE}%"
+              echo ""
+
+              echo "Scenarios:"
+              echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
+              echo ""
+
               exit 1
             fi
 

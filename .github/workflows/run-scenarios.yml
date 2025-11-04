@@ -1,5 +1,10 @@
 name: Run Scenarios
 
+# Supports multiple trigger types:
+# 1. Manual trigger (workflow_dispatch) - Run from GitHub Actions UI with custom inputs
+# 2. Automatic on PR (pull_request) - Runs on PR open/update
+# 3. Label-based (labeled) - Add 'run-scenarios' label to trigger
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,29 +23,34 @@ on:
         required: false
         default: '3600'
 
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, labeled]
+
 jobs:
   run-scenarios:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v2
-    
+    - uses: actions/checkout@v4
+
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: '3.x'
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    
+
     - name: Run scenarios
       env:
         API_BASE_URL: ${{ secrets.API_BASE_URL }}
         API_KEY: ${{ secrets.API_KEY }}
-        AGENT_ID: ${{ github.event.inputs.agent_id }}
-        SCENARIOS: ${{ github.event.inputs.scenarios }}
-        FREQUENCY: ${{ github.event.inputs.frequency }}
-        TIMEOUT: ${{ github.event.inputs.timeout }}
+        AGENT_ID: ${{ github.event.inputs.agent_id || secrets.AGENT_ID }}
+        SCENARIOS: ${{ github.event.inputs.scenarios || secrets.SCENARIOS }}
+        FREQUENCY: ${{ github.event.inputs.frequency || '1' }}
+        TIMEOUT: ${{ github.event.inputs.timeout || '3600' }}
       run: python run_scenarios.py 

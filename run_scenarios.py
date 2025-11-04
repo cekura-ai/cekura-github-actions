@@ -8,7 +8,7 @@ class ScenarioRunner:
                  frequency: int = 1, timeout: int = 3600, poll_interval: int = 30):
         self.base_url = base_url.rstrip('/')
         self.headers = {
-            'X-VOCERA-API-KEY': api_key,
+            'X-CEKURA-API-KEY': api_key,
             'Content-Type': 'application/json'
         }
         self.agent_id = agent_id
@@ -19,7 +19,7 @@ class ScenarioRunner:
 
     def run_scenarios(self) -> str:
         """Run scenarios and return result ID"""
-        url = f"{self.base_url}/test_framework/v1/scenarios-external/run_scenarios/"
+        url = f"{self.base_url}/test_framework/v1/scenarios/run_scenarios/"
         payload = {
             "agent_id": self.agent_id,
             "scenarios": self.scenarios,
@@ -38,7 +38,7 @@ class ScenarioRunner:
 
     def check_result_status(self, result_id: str) -> Dict:
         """Check status of a result"""
-        url = f"{self.base_url}/test_framework/v1/results-external/{result_id}/"
+        url = f"{self.base_url}/test_framework/v1/results/{result_id}/"
         try:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()

@@ -1,6 +1,6 @@
-name: "Vocera Scenario Runner"
-description: "Run scenarios against Vocera agents"
-author: "Vocera AI"
+name: "Cekura Scenario Runner"
+description: "Run scenarios against Cekura agents"
+author: "Cekura AI"
 
 inputs:
   agent_id:
@@ -22,7 +22,7 @@ runs:
   using: "composite"
   steps:
     - name: Run Scenarios
-      uses: vocera-ai/vocera-github-actions/.github/workflows/run-scenarios.yml@main
+      uses: cekura-ai/vocera-github-actions/.github/workflows/run-scenarios.yml@main
       with:
         agent_id: ${{ inputs.agent_id }}
         scenarios: ${{ inputs.scenarios }}

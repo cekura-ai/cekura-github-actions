@@ -19,7 +19,7 @@ class ScenarioRunner:
 
     def run_scenarios(self) -> str:
         """Run scenarios and return result ID"""
-        url = f"{self.base_url}/test_framework/v1/scenarios-external/run_scenarios/"
+        url = f"{self.base_url}/test_framework/v1/scenarios/run_scenarios/"
         payload = {
             "agent_id": self.agent_id,
             "scenarios": self.scenarios,
@@ -38,7 +38,7 @@ class ScenarioRunner:
 
     def check_result_status(self, result_id: str) -> Dict:
         """Check status of a result"""
-        url = f"{self.base_url}/test_framework/v1/results-external/{result_id}/"
+        url = f"{self.base_url}/test_framework/v1/results/{result_id}/"
         try:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()

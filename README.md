@@ -1,5 +1,8 @@
 # Cekura GitHub Actions - Scenario Runner
 
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Ready-blue?logo=github-actions)](https://github.com/cekura-ai/vocera-github-actions)
+[![Documentation](https://img.shields.io/badge/Documentation-Available-green?logo=gitbook)](https://docs.cekura.ai/guides/github-actions-ci-cd)
+
 Run automated test scenarios against Cekura agents directly from your GitHub workflows. This repository provides reusable workflows and examples for integrating Cekura scenario testing into your CI/CD pipeline.
 
 ## Features
@@ -251,7 +254,7 @@ For a comprehensive guide on GitHub Actions CI/CD with Cekura, including:
 - Advanced patterns and best practices
 - Complete troubleshooting guide
 
-Visit our documentation: [GitHub Actions CI/CD Guide](https://docs.cekura.ai)
+Visit our documentation: **[GitHub Actions CI/CD Guide](https://docs.cekura.ai/guides/github-actions-ci-cd)**
 
 ## Support
 

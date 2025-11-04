@@ -1,0 +1,153 @@
+name: Cekura Run Tests
+
+on:
+  workflow_call:
+    inputs:
+      agent_id:
+        description: 'Agent ID to test'
+        required: true
+        type: string
+      scenario_ids:
+        description: 'Comma-separated scenario IDs (e.g., 123,456,789)'
+        required: false
+        type: string
+      tags:
+        description: 'Comma-separated tags (e.g., smoke-test,critical)'
+        required: false
+        type: string
+      phone_number:
+        description: 'Outbound phone number for testing'
+        required: false
+        type: string
+      api_url:
+        description: 'Cekura API URL'
+        required: false
+        type: string
+        default: 'https://api.cekura.ai'
+      frequency:
+        description: 'Number of times to run each scenario'
+        required: false
+        type: string
+        default: '1'
+      timeout:
+        description: 'Timeout in seconds'
+        required: false
+        type: string
+        default: '3600'
+    secrets:
+      CEKURA_API_KEY:
+        description: 'Cekura API Key'
+        required: true
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Cekura Tests
+        env:
+          API_URL: ${{ inputs.api_url }}
+          API_KEY: ${{ secrets.CEKURA_API_KEY }}
+          AGENT_ID: ${{ inputs.agent_id }}
+          SCENARIO_IDS: ${{ inputs.scenario_ids }}
+          TAGS: ${{ inputs.tags }}
+          PHONE_NUMBER: ${{ inputs.phone_number }}
+          FREQUENCY: ${{ inputs.frequency }}
+          TIMEOUT: ${{ inputs.timeout }}
+        run: |
+          echo "Starting Cekura tests..."
+          echo "Agent ID: $AGENT_ID"
+
+          # Build JSON payload
+          PAYLOAD="{\"agent_id\":\"${AGENT_ID}\",\"frequency\":${FREQUENCY}"
+
+          # Add scenarios if provided
+          if [ -n "$SCENARIO_IDS" ]; then
+            echo "Using Scenario IDs: $SCENARIO_IDS"
+            SCENARIOS_JSON=$(echo "$SCENARIO_IDS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "%s", $i; if(i<NF) printf ","}; printf "]"}')
+            PAYLOAD="${PAYLOAD},\"scenarios\":${SCENARIOS_JSON}"
+          fi
+
+          # Add tags if provided
+          if [ -n "$TAGS" ]; then
+            echo "Using Tags: $TAGS"
+            TAGS_JSON=$(echo "$TAGS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "\"%s\"", $i; if(i<NF) printf ","}; printf "]"}')
+            PAYLOAD="${PAYLOAD},\"tags\":${TAGS_JSON}"
+          fi
+
+          # Add phone number if provided
+          if [ -n "$PHONE_NUMBER" ]; then
+            echo "Using Phone Number: $PHONE_NUMBER"
+            PAYLOAD="${PAYLOAD},\"outbound_phone_number\":\"${PHONE_NUMBER}\""
+          fi
+
+          PAYLOAD="${PAYLOAD}}"
+          echo "Payload: $PAYLOAD"
+
+          # Start the test run
+          echo "Triggering test run..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/scenarios/run_scenarios/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+            echo "Error: Failed to start test run (HTTP $HTTP_CODE)"
+            echo "$BODY"
+            exit 1
+          fi
+
+          # Extract result ID
+          RESULT_ID=$(echo "$BODY" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+          if [ -z "$RESULT_ID" ]; then
+            echo "Error: No result ID returned"
+            echo "$BODY"
+            exit 1
+          fi
+
+          echo "Test run started with ID: $RESULT_ID"
+
+          # Poll for completion
+          START_TIME=$(date +%s)
+          POLL_INTERVAL=30
+
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+
+            if [ $ELAPSED -gt $TIMEOUT ]; then
+              echo "Error: Timeout reached after ${TIMEOUT} seconds"
+              exit 1
+            fi
+
+            # Check status
+            STATUS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET \
+              "${API_URL}/test_framework/v1/results/${RESULT_ID}/" \
+              -H "X-CEKURA-API-KEY: ${API_KEY}")
+
+            STATUS_HTTP_CODE=$(echo "$STATUS_RESPONSE" | tail -n1)
+            STATUS_BODY=$(echo "$STATUS_RESPONSE" | sed '$d')
+
+            if [ "$STATUS_HTTP_CODE" != "200" ]; then
+              echo "Error: Failed to check status (HTTP $STATUS_HTTP_CODE)"
+              exit 1
+            fi
+
+            STATUS=$(echo "$STATUS_BODY" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+            echo "Status: $STATUS (elapsed: ${ELAPSED}s)"
+
+            if [ "$STATUS" = "completed" ]; then
+              echo "✅ Tests completed successfully!"
+              exit 0
+            elif [ "$STATUS" = "failed" ]; then
+              echo "❌ Tests failed"
+              exit 1
+            fi
+
+            sleep $POLL_INTERVAL
+          done

@@ -1,7 +1,7 @@
 # Cekura GitHub Actions
 
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Ready-blue?logo=github-actions)](https://github.com/cekura-ai/vocera-github-actions)
-[![Documentation](https://img.shields.io/badge/Documentation-Available-green?logo=gitbook)](https://docs.cekura.ai/guides/github-actions-ci-cd)
+[![Documentation](https://img.shields.io/badge/Documentation-Available-green?logo=gitbook)](https://docs.cekura.ai/documentation/guides/github-actions-ci-cd)
 
 Automate your agent testing by integrating Cekura with GitHub Actions. This repository provides a reusable workflow for running Cekura test scenarios in your CI/CD pipeline.
 
@@ -207,7 +207,7 @@ For a comprehensive guide on GitHub Actions with Cekura, including:
 - Advanced patterns and best practices
 - Complete troubleshooting guide
 
-Visit our documentation: **[GitHub Actions Tutorial](https://docs.cekura.ai/guides/github-actions-ci-cd)**
+Visit our documentation: **[GitHub Actions Tutorial](https://docs.cekura.ai/documentation/guides/github-actions-ci-cd)**
 
 ## License
 

@@ -168,7 +168,7 @@ runs:
           if [ "$STATUS" = "completed" ]; then
             echo ""
             echo "=========================================="
-            echo "Test execution completed successfully"
+            echo "Test execution completed"
             echo "=========================================="
             echo ""
 
@@ -193,6 +193,13 @@ runs:
             echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
             echo ""
 
+            # Exit with error if there are any failed runs
+            if [ "$FAILED_RUNS" -gt 0 ]; then
+              echo "❌ Test execution completed with failures"
+              exit 1
+            fi
+
+            echo "✅ All tests passed successfully"
             exit 0
           elif [ "$STATUS" = "failed" ]; then
             echo ""

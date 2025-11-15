@@ -32,22 +32,39 @@ Go to your repository **Settings** → **Secrets and variables** → **Actions**
 Create `.github/workflows/test-agents.yml` in your repository:
 
 ```yaml
-name: Test Agents
+name: Agent Tests
 
 on:
+  workflow_dispatch:
+    inputs:
+      agent_id:
+        description: 'The agent identifier'
+        required: false
+        type: string
+      scenario_ids:
+        description: 'Comma-separated scenario IDs (e.g., "123,456,789")'
+        required: false
+        type: string
+      api_url:
+        description: 'Custom Cekura API endpoint'
+        required: false
+        type: string
+        default: 'https://api.cekura.ai'
+
   push:
     branches: [main]
   pull_request:
 
 jobs:
-  test:
+  run-simulation-tests:
     runs-on: ubuntu-latest
     steps:
-      - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@main
+      - name: Cekura Run Tests
+        uses: cekura-ai/cekura-github-actions@v1.0.0
         with:
-          agent_id: ${{ vars.AGENT_ID }}
-          tags: ${{ vars.TAGS }}
+          agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
+          scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
+          api_url: ${{ inputs.api_url || vars.API_URL }}
           api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
@@ -62,13 +79,12 @@ Commit and push your workflow file. The action will run automatically on the nex
 Test specific scenarios by their IDs:
 
 ```yaml
-steps:
-  - name: Run Cekura Tests
-    uses: cekura-ai/cekura-github-actions@main
-    with:
-      agent_id: 'your-agent-id'
-      scenario_ids: '123,456,789'
-      api_key: ${{ secrets.CEKURA_API_KEY }}
+- name: Run Cekura Tests
+  uses: cekura-ai/cekura-github-actions@v1.0.0
+  with:
+    agent_id: ${{ vars.AGENT_ID }}
+    scenario_ids: ${{ vars.SCENARIO_IDS }}
+    api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
 ### Using Tags
@@ -76,13 +92,12 @@ steps:
 Test all scenarios with specific tags:
 
 ```yaml
-steps:
-  - name: Run Cekura Tests
-    uses: cekura-ai/cekura-github-actions@main
-    with:
-      agent_id: 'your-agent-id'
-      tags: 'smoke-test,critical'
-      api_key: ${{ secrets.CEKURA_API_KEY }}
+- name: Run Cekura Tests
+  uses: cekura-ai/cekura-github-actions@v1.0.0
+  with:
+    agent_id: ${{ vars.AGENT_ID }}
+    tags: ${{ vars.TAGS }}
+    api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
 ### Using Both Tags and Scenario IDs
@@ -90,14 +105,13 @@ steps:
 Combine both approaches:
 
 ```yaml
-steps:
-  - name: Run Cekura Tests
-    uses: cekura-ai/cekura-github-actions@main
-    with:
-      agent_id: 'your-agent-id'
-      scenario_ids: '123,456'
-      tags: 'smoke-test'
-      api_key: ${{ secrets.CEKURA_API_KEY }}
+- name: Run Cekura Tests
+  uses: cekura-ai/cekura-github-actions@v1.0.0
+  with:
+    agent_id: ${{ vars.AGENT_ID }}
+    scenario_ids: ${{ vars.SCENARIO_IDS }}
+    tags: ${{ vars.TAGS }}
+    api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
 ### Testing with Phone Numbers
@@ -105,14 +119,13 @@ steps:
 When testing agents that make outbound calls:
 
 ```yaml
-steps:
-  - name: Run Cekura Tests
-    uses: cekura-ai/cekura-github-actions@main
-    with:
-      agent_id: 'your-agent-id'
-      scenario_ids: '123,456'
-      phone_number: '+1234567890'
-      api_key: ${{ secrets.CEKURA_API_KEY }}
+- name: Run Cekura Tests
+  uses: cekura-ai/cekura-github-actions@v1.0.0
+  with:
+    agent_id: ${{ vars.AGENT_ID }}
+    scenario_ids: ${{ vars.SCENARIO_IDS }}
+    phone_number: ${{ vars.PHONE_NUMBER }}
+    api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
 ### Manual Trigger
@@ -126,21 +139,23 @@ on:
   workflow_dispatch:
     inputs:
       agent_id:
-        description: 'Agent ID'
-        required: true
+        description: 'The agent identifier'
+        required: false
+        type: string
       scenario_ids:
-        description: 'Scenario IDs (comma-separated)'
-        required: true
+        description: 'Comma-separated scenario IDs (e.g., "123,456,789")'
+        required: false
+        type: string
 
 jobs:
-  test:
+  run-simulation-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@main
+        uses: cekura-ai/cekura-github-actions@v1.0.0
         with:
-          agent_id: ${{ github.event.inputs.agent_id }}
-          scenario_ids: ${{ github.event.inputs.scenario_ids }}
+          agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
+          scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
           api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
@@ -156,11 +171,11 @@ on:
     - cron: '0 2 * * *'  # Run at 2 AM daily
 
 jobs:
-  test:
+  run-simulation-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@main
+        uses: cekura-ai/cekura-github-actions@v1.0.0
         with:
           agent_id: ${{ vars.AGENT_ID }}
           tags: 'regression'
@@ -173,23 +188,23 @@ Test multiple environments in the same workflow:
 
 ```yaml
 jobs:
-  test-staging:
+  staging-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Test Staging
-        uses: cekura-ai/cekura-github-actions@main
+        uses: cekura-ai/cekura-github-actions@v1.0.0
         with:
           agent_id: ${{ vars.STAGING_AGENT_ID }}
           tags: 'smoke-test'
           api_url: 'https://staging-api.cekura.ai'
           api_key: ${{ secrets.STAGING_API_KEY }}
 
-  test-production:
+  production-tests:
     runs-on: ubuntu-latest
-    needs: test-staging
+    needs: staging-tests
     steps:
       - name: Test Production
-        uses: cekura-ai/cekura-github-actions@main
+        uses: cekura-ai/cekura-github-actions@v1.0.0
         with:
           agent_id: ${{ vars.PROD_AGENT_ID }}
           tags: 'smoke-test'
@@ -221,6 +236,13 @@ The action uses standard tools pre-installed on GitHub runners:
 - `python3` for JSON parsing
 
 No additional dependencies or setup steps required - it works out of the box on `ubuntu-latest` runners.
+
+### Workflow Behavior
+
+- **Success**: If all test runs pass (failed count = 0), the workflow exits successfully ✅
+- **Failure**: If any test runs fail (failed count > 0), the workflow exits with an error ❌
+
+This ensures your CI/CD pipeline correctly reflects the state of your agent tests.
 
 ## Complete Documentation
 

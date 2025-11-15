@@ -11,11 +11,6 @@ on:
         description: 'Comma-separated scenario IDs (e.g., "123,456,789")'
         required: false
         type: string
-      api_url:
-        description: 'Custom Cekura API endpoint'
-        required: false
-        type: string
-        default: 'https://backend.usesynth.co'
 
 jobs:
   run-simulation-tests:
@@ -26,5 +21,4 @@ jobs:
         with:
           agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
           scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
-          api_url: ${{ inputs.api_url || vars.BACKEND_URL }}
           api_key: ${{ secrets.CEKURA_API_KEY }}

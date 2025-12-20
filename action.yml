@@ -15,6 +15,9 @@ inputs:
   phone_number:
     description: 'Outbound phone number for testing'
     required: false
+  name:
+    description: 'Name/label for this test run'
+    required: false
   api_url:
     description: 'Cekura API URL'
     required: false
@@ -31,10 +34,19 @@ inputs:
     description: 'Cekura API Key'
     required: true
 
+outputs:
+  result_url:
+    description: 'Shareable URL to view test results'
+    value: ${{ steps.run-tests.outputs.result_url }}
+  result_id:
+    description: 'Test result ID'
+    value: ${{ steps.run-tests.outputs.result_id }}
+
 runs:
   using: "composite"
   steps:
     - name: Run Cekura Tests
+      id: run-tests
       shell: bash
       env:
         API_URL: ${{ inputs.api_url }}
@@ -43,6 +55,7 @@ runs:
         SCENARIO_IDS: ${{ inputs.scenario_ids }}
         TAGS: ${{ inputs.tags }}
         PHONE_NUMBER: ${{ inputs.phone_number }}
+        NAME: ${{ inputs.name }}
         FREQUENCY: ${{ inputs.frequency }}
         TIMEOUT: ${{ inputs.timeout }}
       run: |
@@ -73,6 +86,12 @@ runs:
         if [ -n "$PHONE_NUMBER" ]; then
           PAYLOAD="${PAYLOAD},\"outbound_phone_number\":\"${PHONE_NUMBER}\""
           echo "  Phone Number: $PHONE_NUMBER"
+        fi
+
+        if [ -n "$NAME" ]; then
+          ESCAPED_NAME=$(echo "$NAME" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+          PAYLOAD="${PAYLOAD},\"name\":${ESCAPED_NAME}"
+          echo "  Run Name: $NAME"
         fi
 
         PAYLOAD="${PAYLOAD}}"
@@ -193,6 +212,49 @@ runs:
             echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
             echo ""
 
+            # Always set result_id output
+            echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
+
+            # Generate shareable link
+            echo "Generating shareable link..."
+            EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
+            SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
+
+            SHAREABLE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
+              -H "X-CEKURA-API-KEY: ${API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${SHAREABLE_PAYLOAD}")
+
+            SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
+            SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
+
+            if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
+              RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
+              if [ -n "$RESULT_URL" ]; then
+                echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
+                echo ""
+                echo "📊 View Results: $RESULT_URL"
+                echo ""
+                echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "✅ All tests passed successfully" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
+                echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
+                echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
+                echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
+                echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
+                echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "Warning: Could not extract shareable link from response"
+              fi
+            else
+              echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
+            fi
+
             # Exit with error if there are any failed runs
             if [ "$FAILED_RUNS" -gt 0 ]; then
               echo "❌ Test execution completed with failures"
@@ -228,6 +290,49 @@ runs:
             echo "Scenarios:"
             echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
             echo ""
+
+            # Always set result_id output
+            echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
+
+            # Generate shareable link
+            echo "Generating shareable link..."
+            EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
+            SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
+
+            SHAREABLE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
+              -H "X-CEKURA-API-KEY: ${API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${SHAREABLE_PAYLOAD}")
+
+            SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
+            SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
+
+            if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
+              RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
+              if [ -n "$RESULT_URL" ]; then
+                echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
+                echo ""
+                echo "📊 View Results: $RESULT_URL"
+                echo ""
+                echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "❌ Test execution completed with failures" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
+                echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
+                echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
+                echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
+                echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
+                echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "Warning: Could not extract shareable link from response"
+              fi
+            else
+              echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
+            fi
 
             exit 1
           fi

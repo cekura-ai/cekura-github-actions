@@ -215,6 +215,15 @@ runs:
             # Always set result_id output
             echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
 
+            # Determine status message based on results
+            if [ "$FAILED_RUNS" -gt 0 ]; then
+              STATUS_MESSAGE="❌ Test execution completed with failures"
+              SUMMARY_STATUS="❌ Tests Failed"
+            else
+              STATUS_MESSAGE="✅ All tests passed successfully"
+              SUMMARY_STATUS="✅ All Tests Passed"
+            fi
+
             # Generate shareable link
             echo "Generating shareable link..."
             EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
@@ -229,6 +238,19 @@ runs:
             SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
             SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
 
+            # Always write summary
+            echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "$SUMMARY_STATUS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
+            echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
+            echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
+            echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
+            echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
             if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
               RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
               if [ -n "$RESULT_URL" ]; then
@@ -236,17 +258,6 @@ runs:
                 echo ""
                 echo "📊 View Results: $RESULT_URL"
                 echo ""
-                echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "✅ All tests passed successfully" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
-                echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
-                echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
-                echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
-                echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
-                echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
                 echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
               else
                 echo "Warning: Could not extract shareable link from response"
@@ -255,13 +266,11 @@ runs:
               echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
             fi
 
-            # Exit with error if there are any failed runs
+            # Output status and exit with appropriate code
+            echo "$STATUS_MESSAGE"
             if [ "$FAILED_RUNS" -gt 0 ]; then
-              echo "❌ Test execution completed with failures"
               exit 1
             fi
-
-            echo "✅ All tests passed successfully"
             exit 0
           elif [ "$STATUS" = "failed" ]; then
             echo ""
@@ -308,6 +317,19 @@ runs:
             SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
             SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
 
+            # Always write summary
+            echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Test Execution Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
+            echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
+            echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
+            echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
+            echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
             if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
               RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
               if [ -n "$RESULT_URL" ]; then
@@ -315,17 +337,6 @@ runs:
                 echo ""
                 echo "📊 View Results: $RESULT_URL"
                 echo ""
-                echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "❌ Test execution completed with failures" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
-                echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
-                echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
-                echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
-                echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
-                echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
                 echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
               else
                 echo "Warning: Could not extract shareable link from response"

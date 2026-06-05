@@ -13,14 +13,14 @@ Automated voice agent testing on every PR for LiveKit-based agents. Setup takes 
 ## Prerequisites
 
 - A [LiveKit Cloud](https://livekit.io) project
-- A [Cekura](https://app.cekura.ai) account
+- A [Cekura](https://api.cekura.ai) account
 - A deployed staging LiveKit agent (your agent process must be running and connected to LiveKit before evals run)
 
 ---
 
 ## Step 1: Set up Cekura (one-time)
 
-1. Go to [app.cekura.ai](https://app.cekura.ai) → **New Project**
+1. Go to [api.cekura.ai](https://api.cekura.ai) → **New Project**
 2. Create an agent: **Agents** → **Add Agent** → Select **LiveKit** as connection type
 3. Enter your LiveKit server URL (`wss://your-app.livekit.cloud`)
 4. Note your **Agent ID** (e.g., `42`)

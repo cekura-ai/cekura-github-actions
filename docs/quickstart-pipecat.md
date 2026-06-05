@@ -14,7 +14,7 @@ Automated voice agent testing on every PR. Setup takes ~10 minutes.
 ## Prerequisites
 
 - A [Pipecat Cloud](https://pipecat.daily.co) account
-- A [Cekura](https://app.cekura.ai) account
+- A [Cekura](https://api.cekura.ai) account
 - Your agent in a GitHub repo with a Dockerfile
 
 ---
@@ -44,7 +44,7 @@ Your agent needs environment variables (LLM API keys, STT keys, etc.) at runtime
 
 ## Step 2: Set up Cekura (one-time)
 
-1. Go to [app.cekura.ai](https://app.cekura.ai) → **New Project**
+1. Go to [api.cekura.ai](https://api.cekura.ai) → **New Project**
 2. Create an agent: **Agents** → **Add Agent** → Select **Pipecat** as connection type
 3. Note your **Agent ID** (e.g., `42`)
 4. Create scenarios: **Scenarios** → **Generate Scenarios** (or create manually)

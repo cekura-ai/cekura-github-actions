@@ -31,7 +31,7 @@ The connection type is configured on the Cekura agent (one-time in the Cekura da
 
 ### 1. Create your agent in Cekura
 
-1. Go to [app.cekura.ai](https://app.cekura.ai) → **New Project**
+1. Go to [api.cekura.ai](https://api.cekura.ai) → **New Project**
 2. **Agents** → **Add Agent** → Select your connection type (WebSocket, SIP, VAPI, etc.)
 3. Enter your agent's endpoint URL / phone number / API details
 4. Note your **Agent ID**

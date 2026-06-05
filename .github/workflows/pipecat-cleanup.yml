@@ -1,0 +1,58 @@
+name: Pipecat Cloud Cleanup
+# Deletes the PR-scoped Pipecat Cloud agent service when a PR is closed.
+# Add this alongside pipecat-eval.yml to prevent stale agent services accumulating.
+#
+# Usage in your workflow:
+#   name: Cleanup PR agent
+#   on:
+#     pull_request:
+#       types: [closed]
+#   jobs:
+#     cleanup:
+#       uses: cekura-ai/cekura-github-actions/.github/workflows/pipecat-cleanup.yml@v2
+#       with:
+#         agent_name: my-voice-agent
+#       secrets:
+#         PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      agent_name:
+        description: 'Base agent name (same value used in pipecat-eval.yml)'
+        required: true
+        type: string
+      pipecat_api_url:
+        description: 'Pipecat Cloud API base URL'
+        required: false
+        default: 'https://api.pipecat.daily.co'
+        type: string
+    secrets:
+      PIPECAT_API_KEY:
+        required: true
+
+jobs:
+  cleanup:
+    name: Delete PR agent service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Pipecat Cloud service
+        shell: bash
+        env:
+          PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+          PIPECAT_API_URL: ${{ inputs.pipecat_api_url }}
+          SERVICE_NAME: ${{ format('{0}-pr-{1}', inputs.agent_name, github.event.pull_request.number) }}
+        run: |
+          echo "Deleting $SERVICE_NAME..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X DELETE \
+            -H "Authorization: Bearer $PIPECAT_API_KEY" \
+            "$PIPECAT_API_URL/v1/agents/$SERVICE_NAME")
+
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+            echo "Deleted $SERVICE_NAME"
+          elif [ "$HTTP_CODE" = "404" ]; then
+            echo "$SERVICE_NAME not found — nothing to delete"
+          else
+            echo "Warning: DELETE returned HTTP $HTTP_CODE (continuing)"
+          fi

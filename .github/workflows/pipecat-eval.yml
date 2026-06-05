@@ -1,0 +1,413 @@
+name: Pipecat Cloud Eval
+# Full CI/CD workflow for Pipecat Cloud agents:
+#   build Docker image → push to GHCR → deploy to Pipecat Cloud → run Cekura evals → report → cleanup
+#
+# Prerequisites (one-time, in Pipecat Cloud dashboard):
+#   1. Create an image pull secret (pipecat_pull_secret) for GHCR
+#   2. Create a secret set (pipecat_secret_set) with your agent's env vars (LLM keys, STT keys, etc.)
+#   3. Create your agent in Cekura dashboard and note the agent_id
+#
+# Minimal usage in your workflow:
+#   jobs:
+#     eval:
+#       uses: cekura-ai/cekura-github-actions/.github/workflows/pipecat-eval.yml@v2
+#       with:
+#         agent_name: my-voice-agent
+#         pipecat_secret_set: my-agent-secrets
+#         pipecat_pull_secret: my-agent-pull-secret
+#         cekura_agent_id: "42"
+#       secrets:
+#         CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+#         PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+#
+# For SIP, WebSocket, or Text transports (agent deployed elsewhere):
+#   Set transport: sip|websocket|text and agent_url to your endpoint.
+#   The build/deploy jobs are skipped — only evals run.
+
+on:
+  workflow_call:
+    inputs:
+      agent_name:
+        description: 'Agent name slug (e.g. my-voice-agent)'
+        required: true
+        type: string
+      transport:
+        description: 'Connection transport: webrtc (default, deploys to Pipecat Cloud), sip, websocket, or text'
+        required: false
+        default: 'webrtc'
+        type: string
+      agent_url:
+        description: 'Agent endpoint URL — required for sip/websocket/text transports (SIP URI or WSS URL)'
+        required: false
+        type: string
+      dockerfile_path:
+        description: 'Path to Dockerfile (relative to repo root)'
+        required: false
+        default: './Dockerfile'
+        type: string
+      pipecat_secret_set:
+        description: 'Pipecat Cloud secret set name (required for webrtc transport)'
+        required: false
+        type: string
+      pipecat_pull_secret:
+        description: 'Pipecat Cloud image pull secret name (required for webrtc transport)'
+        required: false
+        type: string
+      min_agents:
+        description: 'Minimum agent instances on Pipecat Cloud'
+        required: false
+        default: '1'
+        type: string
+      max_agents:
+        description: 'Maximum agent instances on Pipecat Cloud'
+        required: false
+        default: '3'
+        type: string
+      stabilization_secs:
+        description: 'Seconds to wait after deploy before running evals'
+        required: false
+        default: '20'
+        type: string
+      cekura_agent_id:
+        description: 'Cekura agent ID (from Cekura dashboard)'
+        required: true
+        type: string
+      scenario_ids:
+        description: 'Comma-separated Cekura scenario IDs (omit to run all scenarios for the agent)'
+        required: false
+        type: string
+      frequency:
+        description: 'Number of times to run each scenario'
+        required: false
+        default: '1'
+        type: string
+      cekura_api_url:
+        description: 'Cekura API base URL'
+        required: false
+        default: 'https://api.cekura.ai'
+        type: string
+      pipecat_api_url:
+        description: 'Pipecat Cloud API base URL'
+        required: false
+        default: 'https://api.pipecat.daily.co'
+        type: string
+      timeout:
+        description: 'Eval timeout in seconds'
+        required: false
+        default: '1800'
+        type: string
+      fail_on_failure:
+        description: 'Fail the workflow if any eval fails'
+        required: false
+        default: 'true'
+        type: string
+    secrets:
+      CEKURA_API_KEY:
+        required: true
+      PIPECAT_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    if: inputs.transport == 'webrtc'
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push image
+        id: build
+        shell: bash
+        env:
+          AGENT_NAME: ${{ inputs.agent_name }}
+          DOCKERFILE: ${{ inputs.dockerfile_path }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.sha }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          IMAGE_TAG="pr-${PR_NUMBER}-${SHA:0:7}"
+          IMAGE_URI="ghcr.io/${OWNER}/${AGENT_NAME}:${IMAGE_TAG}"
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --file "${DOCKERFILE}" \
+            --tag "${IMAGE_URI}" \
+            --push \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            .
+
+  deploy:
+    name: Deploy to Pipecat Cloud
+    runs-on: ubuntu-latest
+    needs: build
+    if: inputs.transport == 'webrtc'
+    outputs:
+      agent_service_name: ${{ steps.deploy.outputs.agent_service_name }}
+    steps:
+      - name: Deploy agent
+        id: deploy
+        shell: bash
+        env:
+          PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+          PIPECAT_API_URL: ${{ inputs.pipecat_api_url }}
+          BASE_AGENT_NAME: ${{ inputs.agent_name }}
+          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SECRET_SET: ${{ inputs.pipecat_secret_set }}
+          PULL_SECRET: ${{ inputs.pipecat_pull_secret }}
+          MIN_AGENTS: ${{ inputs.min_agents }}
+          MAX_AGENTS: ${{ inputs.max_agents }}
+        run: |
+          set -euo pipefail
+          SERVICE_NAME="${BASE_AGENT_NAME}-pr-${PR_NUMBER}"
+          echo "Deploying $SERVICE_NAME..."
+
+          CHECK=$(curl -s -w "\n%{http_code}" \
+            -H "Authorization: Bearer $PIPECAT_API_KEY" \
+            "$PIPECAT_API_URL/v1/agents/$SERVICE_NAME")
+          CHECK_STATUS=$(echo "$CHECK" | tail -n1)
+
+          if [ "$CHECK_STATUS" = "200" ]; then
+            PAYLOAD="{\"image\":\"$IMAGE_URI\",\"imagePullSecretSet\":\"$PULL_SECRET\",\"secretSet\":\"$SECRET_SET\",\"autoScaling\":{\"minAgents\":$MIN_AGENTS,\"maxAgents\":$MAX_AGENTS}}"
+            ENDPOINT="$PIPECAT_API_URL/v1/agents/$SERVICE_NAME"
+          else
+            PAYLOAD="{\"serviceName\":\"$SERVICE_NAME\",\"image\":\"$IMAGE_URI\",\"imagePullSecretSet\":\"$PULL_SECRET\",\"secretSet\":\"$SECRET_SET\",\"autoScaling\":{\"minAgents\":$MIN_AGENTS,\"maxAgents\":$MAX_AGENTS}}"
+            ENDPOINT="$PIPECAT_API_URL/v1/agents"
+          fi
+
+          RESP=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $PIPECAT_API_KEY" \
+            -d "$PAYLOAD" \
+            "$ENDPOINT")
+          STATUS=$(echo "$RESP" | tail -n1)
+          BODY=$(echo "$RESP" | sed '$d')
+
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+            echo "Deployed: $SERVICE_NAME"
+            echo "agent_service_name=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          else
+            echo "Deploy failed (HTTP $STATUS): $BODY"
+            exit 1
+          fi
+
+      - name: Wait for agent to stabilize
+        shell: bash
+        run: sleep ${{ inputs.stabilization_secs }}
+
+  run-evals:
+    name: Run Cekura evals
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: always() && (needs.deploy.result == 'success' || inputs.transport != 'webrtc')
+    outputs:
+      result_id: ${{ steps.run.outputs.result_id }}
+      result_url: ${{ steps.run.outputs.result_url }}
+      pass_count: ${{ steps.run.outputs.pass_count }}
+      fail_count: ${{ steps.run.outputs.fail_count }}
+    steps:
+      - name: Run scenarios
+        id: run
+        env:
+          API_URL: ${{ inputs.cekura_api_url }}
+          API_KEY: ${{ secrets.CEKURA_API_KEY }}
+          AGENT_ID: ${{ inputs.cekura_agent_id }}
+          SCENARIO_IDS: ${{ inputs.scenario_ids }}
+          FREQUENCY: ${{ inputs.frequency }}
+          TIMEOUT: ${{ inputs.timeout }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -e
+          RUN_NAME="pr-${PR_NUMBER}-${SHA:0:7}"
+
+          PAYLOAD="{\"agent_id\":\"${AGENT_ID}\",\"frequency\":${FREQUENCY}"
+          if [ -n "$SCENARIO_IDS" ]; then
+            SCENARIOS_JSON=$(echo "$SCENARIO_IDS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "%s", $i; if(i<NF) printf ","}; printf "]"}')
+            PAYLOAD="${PAYLOAD},\"scenarios\":${SCENARIOS_JSON}"
+          fi
+          PAYLOAD="${PAYLOAD},\"name\":\"${RUN_NAME}\"}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/scenarios/run_scenarios/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+            echo "Failed to start evals (HTTP $HTTP_CODE): $BODY"
+            exit 1
+          fi
+
+          RESULT_ID=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))")
+          echo "Run started (ID: $RESULT_ID)"
+
+          START_TIME=$(date +%s)
+          while true; do
+            ELAPSED=$(( $(date +%s) - START_TIME ))
+            [ $ELAPSED -gt "$TIMEOUT" ] && echo "Timeout after ${TIMEOUT}s" && exit 1
+
+            STATUS_RESP=$(curl -s -w "\n%{http_code}" \
+              "${API_URL}/test_framework/v1/results/${RESULT_ID}/" \
+              -H "X-CEKURA-API-KEY: ${API_KEY}")
+            STATUS=$(echo "$STATUS_RESP" | sed '$d' | python3 -c "import sys, json; print(json.load(sys.stdin).get('status', ''))")
+            echo "  [${ELAPSED}s] $STATUS"
+
+            if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+              DATA=$(echo "$STATUS_RESP" | sed '$d')
+              SUCCESS=$(echo "$DATA" | python3 -c "import sys, json; print(json.load(sys.stdin).get('success_runs_count', 0))")
+              FAILED=$(echo "$DATA" | python3 -c "import sys, json; print(json.load(sys.stdin).get('failed_runs_count', 0))")
+              TOTAL=$(echo "$DATA" | python3 -c "import sys, json; print(json.load(sys.stdin).get('total_runs_count', 0))")
+              RATE=$(echo "$DATA" | python3 -c "import sys, json; print(f\"{json.load(sys.stdin).get('success_rate', 0):.1f}\")")
+
+              echo "Results: $SUCCESS/$TOTAL passed (${RATE}%)"
+              echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
+              echo "pass_count=${SUCCESS}" >> $GITHUB_OUTPUT
+              echo "fail_count=${FAILED}" >> $GITHUB_OUTPUT
+
+              EXPIRE=$(date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ")
+              SHARE=$(curl -s -w "\n%{http_code}" -X POST \
+                "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
+                -H "X-CEKURA-API-KEY: ${API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"expire_at\":\"${EXPIRE}\"}")
+              SHARE_HTTP=$(echo "$SHARE" | tail -n1)
+              RESULT_URL=""
+              if [ "$SHARE_HTTP" = "200" ] || [ "$SHARE_HTTP" = "201" ]; then
+                RESULT_URL=$(echo "$SHARE" | sed '$d' | python3 -c "import sys, json; print(json.load(sys.stdin).get('shareable_link', ''))" 2>/dev/null || echo "")
+              fi
+              echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
+
+              echo "## Cekura Eval Results" >> $GITHUB_STEP_SUMMARY
+              if [ "$FAILED" -gt 0 ]; then
+                echo "❌ **${FAILED} failure(s)** — ${SUCCESS}/${TOTAL} passed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "✅ **All ${TOTAL} runs passed**" >> $GITHUB_STEP_SUMMARY
+              fi
+              [ -n "$RESULT_URL" ] && echo "[View results →]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
+              break
+            fi
+            sleep 30
+          done
+
+  report:
+    name: Post PR comment
+    runs-on: ubuntu-latest
+    needs: run-evals
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const resultId = '${{ needs.run-evals.outputs.result_id }}'
+            const resultUrl = '${{ needs.run-evals.outputs.result_url }}'
+            const passCount = parseInt('${{ needs.run-evals.outputs.pass_count }}' || '0')
+            const failCount = parseInt('${{ needs.run-evals.outputs.fail_count }}' || '0')
+            const total = passCount + failCount
+            const evalsRan = total > 0
+
+            const statusIcon = !evalsRan ? '⚠️' : failCount > 0 ? '❌' : '✅'
+            const statusText = !evalsRan
+              ? 'Evals did not complete — check workflow logs'
+              : failCount > 0
+                ? `**${failCount} failure(s)** — ${passCount}/${total} passed`
+                : `**All ${total} runs passed**`
+
+            const resultLink = resultUrl ? `\n\n[View detailed results in Cekura →](${resultUrl})` : ''
+            const serviceName = '${{ needs.deploy.outputs.agent_service_name }}'
+            const serviceInfo = serviceName ? `\n_Deployed: \`${serviceName}\` · ` : '\n_'
+
+            const sha = '${{ github.sha }}'.slice(0, 7)
+            const body = [
+              '<!-- cekura-eval-results -->',
+              '## Cekura Voice Agent Eval Results',
+              '',
+              `${statusIcon} ${statusText}${resultLink}`,
+              '',
+              `${serviceInfo}Run ID: \`${resultId}\` · Commit \`${sha}\`_`
+            ].join('\n')
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            })
+            const existing = comments.find(c => c.body.includes('<!-- cekura-eval-results -->'))
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              })
+            }
+
+  check:
+    name: Eval gate
+    runs-on: ubuntu-latest
+    needs: run-evals
+    if: inputs.fail_on_failure == 'true'
+    steps:
+      - name: Fail if evals failed
+        shell: bash
+        run: |
+          FAIL_COUNT="${{ needs.run-evals.outputs.fail_count }}"
+          if [ -n "$FAIL_COUNT" ] && [ "$FAIL_COUNT" != "0" ]; then
+            echo "$FAIL_COUNT eval(s) failed."
+            exit 1
+          fi
+          echo "All evals passed."
+
+  cleanup:
+    name: Cleanup PR agent
+    runs-on: ubuntu-latest
+    needs: [deploy, run-evals]
+    if: always() && inputs.transport == 'webrtc' && needs.deploy.result == 'success'
+    steps:
+      - name: Delete PR agent service
+        shell: bash
+        env:
+          PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+          PIPECAT_API_URL: ${{ inputs.pipecat_api_url }}
+          SERVICE_NAME: ${{ needs.deploy.outputs.agent_service_name }}
+        run: |
+          if [ -z "$SERVICE_NAME" ]; then
+            echo "No service to clean up"
+            exit 0
+          fi
+          echo "Deleting $SERVICE_NAME..."
+          curl -s -o /dev/null -w "%{http_code}" \
+            -X DELETE \
+            -H "Authorization: Bearer $PIPECAT_API_KEY" \
+            "$PIPECAT_API_URL/v1/agents/$SERVICE_NAME"
+          echo "Cleanup complete"

@@ -1,0 +1,130 @@
+name: 'Deploy to Pipecat Cloud'
+description: 'Deploy a Docker image to Pipecat Cloud with PR-scoped naming. Creates a new agent service or updates the existing one.'
+
+inputs:
+  api_key:
+    description: 'Pipecat Cloud API key'
+    required: true
+  api_url:
+    description: 'Pipecat Cloud API base URL'
+    required: false
+    default: 'https://api.pipecat.daily.co'
+  agent_name:
+    description: 'Base agent name (e.g. my-voice-agent). The deployed service will be named {agent_name}-pr-{pr_number}.'
+    required: true
+  image_uri:
+    description: 'Full Docker image URI to deploy'
+    required: true
+  pr_number:
+    description: 'PR number — used to scope the deployment to avoid collisions'
+    required: true
+  secret_set:
+    description: 'Pipecat Cloud secret set name (pre-configured in Pipecat Cloud with your agent env vars)'
+    required: true
+  pull_secret:
+    description: 'Pipecat Cloud image pull secret name (pre-configured in Pipecat Cloud)'
+    required: true
+  min_agents:
+    description: 'Minimum number of agent instances'
+    required: false
+    default: '1'
+  max_agents:
+    description: 'Maximum number of agent instances'
+    required: false
+    default: '3'
+  region:
+    description: 'Deployment region'
+    required: false
+    default: 'us-west'
+
+outputs:
+  agent_service_name:
+    description: 'Deployed Pipecat Cloud service name (e.g. my-voice-agent-pr-42)'
+    value: ${{ steps.deploy.outputs.agent_service_name }}
+  agent_url:
+    description: 'API URL for the deployed agent service'
+    value: ${{ steps.deploy.outputs.agent_url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Deploy agent to Pipecat Cloud
+      id: deploy
+      shell: bash
+      env:
+        PIPECAT_API_KEY: ${{ inputs.api_key }}
+        PIPECAT_API_URL: ${{ inputs.api_url }}
+        BASE_AGENT_NAME: ${{ inputs.agent_name }}
+        IMAGE_URI: ${{ inputs.image_uri }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        SECRET_SET: ${{ inputs.secret_set }}
+        PULL_SECRET: ${{ inputs.pull_secret }}
+        MIN_AGENTS: ${{ inputs.min_agents }}
+        MAX_AGENTS: ${{ inputs.max_agents }}
+        REGION: ${{ inputs.region }}
+      run: |
+        set -euo pipefail
+
+        SERVICE_NAME="${BASE_AGENT_NAME}-pr-${PR_NUMBER}"
+        echo "Deploying to Pipecat Cloud: $SERVICE_NAME"
+        echo "  Image: $IMAGE_URI"
+        echo "  Scaling: $MIN_AGENTS-$MAX_AGENTS agents"
+
+        # Check if agent service already exists
+        CHECK=$(curl -s -w "\n%{http_code}" \
+          -H "Authorization: Bearer $PIPECAT_API_KEY" \
+          "$PIPECAT_API_URL/v1/agents/$SERVICE_NAME")
+        CHECK_STATUS=$(echo "$CHECK" | tail -n1)
+
+        if [ "$CHECK_STATUS" = "200" ]; then
+          echo "Service exists — updating..."
+          PAYLOAD=$(cat <<EOF
+        {
+          "image": "$IMAGE_URI",
+          "imagePullSecretSet": "$PULL_SECRET",
+          "secretSet": "$SECRET_SET",
+          "region": "$REGION",
+          "autoScaling": {
+            "minAgents": $MIN_AGENTS,
+            "maxAgents": $MAX_AGENTS
+          }
+        }
+        EOF
+          )
+          ENDPOINT="$PIPECAT_API_URL/v1/agents/$SERVICE_NAME"
+        else
+          echo "Service does not exist — creating..."
+          PAYLOAD=$(cat <<EOF
+        {
+          "serviceName": "$SERVICE_NAME",
+          "image": "$IMAGE_URI",
+          "imagePullSecretSet": "$PULL_SECRET",
+          "secretSet": "$SECRET_SET",
+          "region": "$REGION",
+          "autoScaling": {
+            "minAgents": $MIN_AGENTS,
+            "maxAgents": $MAX_AGENTS
+          }
+        }
+        EOF
+          )
+          ENDPOINT="$PIPECAT_API_URL/v1/agents"
+        fi
+
+        DEPLOY=$(curl -s -w "\n%{http_code}" \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $PIPECAT_API_KEY" \
+          -d "$PAYLOAD" \
+          "$ENDPOINT")
+        DEPLOY_STATUS=$(echo "$DEPLOY" | tail -n1)
+        DEPLOY_BODY=$(echo "$DEPLOY" | sed '$d')
+
+        if [ "$DEPLOY_STATUS" -ge 200 ] && [ "$DEPLOY_STATUS" -lt 300 ]; then
+          echo "Deployed: $SERVICE_NAME"
+          echo "agent_service_name=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          echo "agent_url=${PIPECAT_API_URL}/v1/agents/${SERVICE_NAME}" >> $GITHUB_OUTPUT
+        else
+          echo "Deploy failed (HTTP $DEPLOY_STATUS): $DEPLOY_BODY"
+          exit 1
+        fi

@@ -1,0 +1,258 @@
+name: Cekura Eval (Generic)
+# Reusable workflow for running Cekura evals against any deployed agent.
+# Supports all connection types: pipecat, livekit, websocket, sip, vapi, retell, elevenlabs, text.
+# For Pipecat Cloud (build + deploy + eval), use pipecat-eval.yml instead.
+#
+# Usage in your workflow:
+#   jobs:
+#     eval:
+#       uses: cekura-ai/cekura-github-actions/.github/workflows/eval.yml@v2
+#       with:
+#         cekura_agent_id: "42"
+#         scenario_ids: "1234,1235"
+#       secrets:
+#         CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      cekura_agent_id:
+        description: 'Cekura agent ID (from Cekura dashboard or auto-provisioned)'
+        required: true
+        type: string
+      scenario_ids:
+        description: 'Comma-separated Cekura scenario IDs to run'
+        required: false
+        type: string
+      frequency:
+        description: 'Number of times to run each scenario'
+        required: false
+        default: '1'
+        type: string
+      run_name:
+        description: 'Label for this test run (defaults to pr-{number}-{sha})'
+        required: false
+        type: string
+      cekura_api_url:
+        description: 'Cekura API base URL'
+        required: false
+        default: 'https://api.cekura.ai'
+        type: string
+      timeout:
+        description: 'Timeout in seconds for eval completion'
+        required: false
+        default: '1800'
+        type: string
+      fail_on_failure:
+        description: 'Fail the workflow if any eval fails'
+        required: false
+        default: 'true'
+        type: string
+    secrets:
+      CEKURA_API_KEY:
+        required: true
+    outputs:
+      result_id:
+        description: 'Cekura result ID'
+        value: ${{ jobs.run-evals.outputs.result_id }}
+      result_url:
+        description: 'Shareable URL for test results'
+        value: ${{ jobs.run-evals.outputs.result_url }}
+      pass_count:
+        description: 'Number of passing runs'
+        value: ${{ jobs.run-evals.outputs.pass_count }}
+      fail_count:
+        description: 'Number of failing runs'
+        value: ${{ jobs.run-evals.outputs.fail_count }}
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  run-evals:
+    runs-on: ubuntu-latest
+    outputs:
+      result_id: ${{ steps.run.outputs.result_id }}
+      result_url: ${{ steps.run.outputs.result_url }}
+      pass_count: ${{ steps.run.outputs.pass_count }}
+      fail_count: ${{ steps.run.outputs.fail_count }}
+    steps:
+      - name: Run Cekura scenarios
+        id: run
+        env:
+          API_URL: ${{ inputs.cekura_api_url }}
+          API_KEY: ${{ secrets.CEKURA_API_KEY }}
+          AGENT_ID: ${{ inputs.cekura_agent_id }}
+          SCENARIO_IDS: ${{ inputs.scenario_ids }}
+          FREQUENCY: ${{ inputs.frequency }}
+          TIMEOUT: ${{ inputs.timeout }}
+          RUN_NAME: ${{ inputs.run_name || format('pr-{0}-{1}', github.event.pull_request.number, github.sha) }}
+        shell: bash
+        run: |
+          set -e
+          echo "Running Cekura evals for agent $AGENT_ID"
+
+          PAYLOAD="{\"agent_id\":\"${AGENT_ID}\",\"frequency\":${FREQUENCY}"
+
+          if [ -n "$SCENARIO_IDS" ]; then
+            SCENARIOS_JSON=$(echo "$SCENARIO_IDS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "%s", $i; if(i<NF) printf ","}; printf "]"}')
+            PAYLOAD="${PAYLOAD},\"scenarios\":${SCENARIOS_JSON}"
+          fi
+
+          ESCAPED_NAME=$(python3 -c "import sys, json; print(json.dumps('${RUN_NAME}'))")
+          PAYLOAD="${PAYLOAD},\"name\":${ESCAPED_NAME}}"
+
+          echo "Triggering scenario run..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/scenarios/run_scenarios/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+            echo "Failed to start eval run (HTTP $HTTP_CODE): $BODY"
+            exit 1
+          fi
+
+          RESULT_ID=$(echo "$BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('id', ''))")
+          if [ -z "$RESULT_ID" ]; then
+            echo "No result ID returned: $BODY"
+            exit 1
+          fi
+
+          echo "Run started (ID: $RESULT_ID). Waiting for completion..."
+          START_TIME=$(date +%s)
+
+          while true; do
+            ELAPSED=$(( $(date +%s) - START_TIME ))
+            if [ $ELAPSED -gt "$TIMEOUT" ]; then
+              echo "Timeout after ${TIMEOUT}s"
+              exit 1
+            fi
+
+            STATUS_RESP=$(curl -s -w "\n%{http_code}" \
+              "${API_URL}/test_framework/v1/results/${RESULT_ID}/" \
+              -H "X-CEKURA-API-KEY: ${API_KEY}")
+            STATUS_HTTP=$(echo "$STATUS_RESP" | tail -n1)
+            STATUS_BODY=$(echo "$STATUS_RESP" | sed '$d')
+
+            if [ "$STATUS_HTTP" != "200" ]; then
+              echo "Status check failed (HTTP $STATUS_HTTP)"
+              exit 1
+            fi
+
+            STATUS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('status', ''))")
+            echo "  [${ELAPSED}s] $STATUS"
+
+            if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+              SUCCESS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('success_runs_count', 0))")
+              FAILED=$(echo "$STATUS_BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('failed_runs_count', 0))")
+              TOTAL=$(echo "$STATUS_BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('total_runs_count', 0))")
+              RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; print(f\"{json.load(sys.stdin).get('success_rate', 0):.1f}\")")
+
+              echo ""
+              echo "Results: $SUCCESS/$TOTAL passed (${RATE}%)"
+
+              echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
+              echo "pass_count=${SUCCESS}" >> $GITHUB_OUTPUT
+              echo "fail_count=${FAILED}" >> $GITHUB_OUTPUT
+
+              # Generate shareable link
+              EXPIRE_AT=$(date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ")
+              SHARE_RESP=$(curl -s -w "\n%{http_code}" -X POST \
+                "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
+                -H "X-CEKURA-API-KEY: ${API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"expire_at\":\"${EXPIRE_AT}\"}")
+              SHARE_HTTP=$(echo "$SHARE_RESP" | tail -n1)
+              SHARE_BODY=$(echo "$SHARE_RESP" | sed '$d')
+
+              RESULT_URL=""
+              if [ "$SHARE_HTTP" = "200" ] || [ "$SHARE_HTTP" = "201" ]; then
+                RESULT_URL=$(echo "$SHARE_BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('shareable_link', ''))" 2>/dev/null || echo "")
+              fi
+              echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
+
+              # Step summary
+              echo "## Cekura Eval Results" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              if [ "$FAILED" -gt 0 ]; then
+                echo "❌ **${FAILED} scenario(s) failed** — ${SUCCESS}/${TOTAL} passed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "✅ **All ${TOTAL} runs passed**" >> $GITHUB_STEP_SUMMARY
+              fi
+              echo "" >> $GITHUB_STEP_SUMMARY
+              if [ -n "$RESULT_URL" ]; then
+                echo "[View detailed results →]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
+              fi
+
+              break
+            fi
+
+            sleep 30
+          done
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const resultId = '${{ steps.run.outputs.result_id }}'
+            const resultUrl = '${{ steps.run.outputs.result_url }}'
+            const passCount = '${{ steps.run.outputs.pass_count }}'
+            const failCount = '${{ steps.run.outputs.fail_count }}'
+            const total = parseInt(passCount) + parseInt(failCount)
+
+            const statusIcon = parseInt(failCount) > 0 ? '❌' : '✅'
+            const statusText = parseInt(failCount) > 0
+              ? `**${failCount} failure(s)** — ${passCount}/${total} passed`
+              : `**All ${total} runs passed**`
+
+            const resultLink = resultUrl
+              ? `\n\n[View detailed results in Cekura →](${resultUrl})`
+              : ''
+
+            const body = [
+              '<!-- cekura-eval-results -->',
+              '## Cekura Voice Agent Eval Results',
+              '',
+              `${statusIcon} ${statusText}${resultLink}`,
+              '',
+              `_Run ID: \`${resultId}\` · Triggered by commit \`${context.sha.slice(0, 7)}\`_`
+            ].join('\n')
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            })
+
+            const marker = '<!-- cekura-eval-results -->'
+            const existing = comments.find(c => c.body.includes(marker))
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              })
+            }
+
+      - name: Fail if evals failed
+        if: ${{ inputs.fail_on_failure == 'true' && steps.run.outputs.fail_count != '0' }}
+        run: |
+          echo "${{ steps.run.outputs.fail_count }} eval(s) failed. See results for details."
+          exit 1

@@ -3,17 +3,97 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Ready-blue?logo=github-actions)](https://github.com/cekura-ai/cekura-github-actions)
 [![Documentation](https://img.shields.io/badge/Documentation-Available-green?logo=gitbook)](https://docs.cekura.ai/documentation/guides/github-actions-ci-cd)
 
-Automate your agent testing by integrating Cekura with GitHub Actions. This action runs Cekura test scenarios directly in your CI/CD pipeline with zero dependencies.
+Automated voice agent CI/CD for Pipecat, LiveKit, and any other voice agent stack. Cekura's testing agents connect to your agent, run your scenarios, and block PR merges if anything fails.
 
-## What This Action Does
+## v2: Full CI/CD with deploy + eval (new)
 
-This GitHub Action allows you to test your Cekura agents automatically:
-- Triggers tests on your Cekura agents via API
-- Monitors test execution in real-time
-- Reports detailed results in your GitHub Actions logs
-- **No dependencies required** - uses standard tools (curl, bash, python3) available on GitHub runners
+v2 adds reusable workflows that handle the full lifecycle: build → deploy → eval → PR comment → cleanup. Pick your path:
 
-## Quick Start
+| Path | Workflow | What it does |
+|---|---|---|
+| **Pipecat Cloud** | `pipecat-eval.yml` | Builds Docker image, deploys to Pipecat Cloud, runs evals, cleans up |
+| **LiveKit** | `livekit-eval.yml` | Runs evals against your deployed LiveKit agent |
+| **Custom / Any stack** | `eval.yml` | Runs evals for any already-deployed agent (SIP, WebSocket, VAPI, Retell, ElevenLabs, text) |
+
+### Pipecat Cloud (10-minute setup)
+
+```yaml
+# .github/workflows/cekura-eval.yml
+name: Cekura Evals
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  eval:
+    uses: cekura-ai/cekura-github-actions/.github/workflows/pipecat-eval.yml@v2
+    with:
+      agent_name: my-voice-agent
+      pipecat_secret_set: my-agent-secrets        # pre-created in Pipecat Cloud
+      pipecat_pull_secret: my-agent-pull-secret   # pre-created in Pipecat Cloud
+      cekura_agent_id: "42"
+      scenario_ids: "1234,1235,1236"
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+      PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+```
+
+Add the cleanup workflow to delete the PR agent when the PR closes:
+
+```yaml
+# .github/workflows/cekura-cleanup.yml
+name: Cleanup PR agent
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  cleanup:
+    uses: cekura-ai/cekura-github-actions/.github/workflows/pipecat-cleanup.yml@v2
+    with:
+      agent_name: my-voice-agent
+    secrets:
+      PIPECAT_API_KEY: ${{ secrets.PIPECAT_API_KEY }}
+```
+
+See [docs/quickstart-pipecat.md](docs/quickstart-pipecat.md) for the full setup guide.
+
+### LiveKit
+
+```yaml
+jobs:
+  eval:
+    uses: cekura-ai/cekura-github-actions/.github/workflows/livekit-eval.yml@v2
+    with:
+      livekit_agent_url: "wss://my-app.livekit.cloud"
+      cekura_agent_id: "42"
+      scenario_ids: "1234,1235"
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+```
+
+See [docs/quickstart-livekit.md](docs/quickstart-livekit.md) for the full setup guide.
+
+### Custom stack (WebSocket, SIP, VAPI, Retell, ElevenLabs, text)
+
+```yaml
+jobs:
+  eval:
+    uses: cekura-ai/cekura-github-actions/.github/workflows/eval.yml@v2
+    with:
+      cekura_agent_id: "42"
+      scenario_ids: "1234,1235"
+    secrets:
+      CEKURA_API_KEY: ${{ secrets.CEKURA_API_KEY }}
+```
+
+See [docs/quickstart-custom.md](docs/quickstart-custom.md) for the full setup guide.
+
+---
+
+## v1: Run evals against an already-deployed agent (original)
+
+The original composite action — triggers scenarios for an agent that's already deployed and waits for results.
+
+## Quick Start (v1)
 
 ### 1. Set Up Repository Secrets
 

@@ -1,0 +1,78 @@
+name: 'Build and Push to GHCR'
+description: 'Build a Docker image and push it to GitHub Container Registry (free, zero AWS setup required)'
+
+inputs:
+  agent_name:
+    description: 'Agent name slug (e.g. my-voice-agent) — used as the image name'
+    required: true
+  dockerfile_path:
+    description: 'Path to the Dockerfile (relative to repo root)'
+    required: false
+    default: './Dockerfile'
+  build_context:
+    description: 'Docker build context path'
+    required: false
+    default: '.'
+  pr_number:
+    description: 'PR number — used in the image tag'
+    required: true
+  sha:
+    description: 'Git commit SHA — used in the image tag'
+    required: true
+  ghcr_token:
+    description: 'GitHub token for GHCR authentication (use secrets.GITHUB_TOKEN)'
+    required: true
+  registry_owner:
+    description: 'GHCR namespace (defaults to github.repository_owner)'
+    required: false
+    default: ''
+
+outputs:
+  image_uri:
+    description: 'Full image URI (ghcr.io/owner/name:tag)'
+    value: ${{ steps.build.outputs.image_uri }}
+  image_tag:
+    description: 'Image tag only'
+    value: ${{ steps.build.outputs.image_tag }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.ghcr_token }}
+
+    - name: Build and push
+      id: build
+      shell: bash
+      env:
+        AGENT_NAME: ${{ inputs.agent_name }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        SHA: ${{ inputs.sha }}
+        REGISTRY_OWNER: ${{ inputs.registry_owner || github.repository_owner }}
+        DOCKERFILE: ${{ inputs.dockerfile_path }}
+        BUILD_CONTEXT: ${{ inputs.build_context }}
+      run: |
+        IMAGE_TAG="pr-${PR_NUMBER}-${SHA:0:7}"
+        IMAGE_URI="ghcr.io/${REGISTRY_OWNER}/${AGENT_NAME}:${IMAGE_TAG}"
+
+        echo "Building image: $IMAGE_URI"
+        echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+        echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+
+        docker buildx build \
+          --platform linux/amd64 \
+          --file "${DOCKERFILE}" \
+          --tag "${IMAGE_URI}" \
+          --push \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          "${BUILD_CONTEXT}"
+
+        echo "Image pushed: $IMAGE_URI"

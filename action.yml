@@ -12,6 +12,16 @@ inputs:
   tags:
     description: 'Comma-separated tags (e.g., smoke-test,critical)'
     required: false
+  execution_mode:
+    description: 'How to run the scenarios: voice, livekit_v2, or pipecat_v2'
+    required: false
+    default: 'voice'
+  livekit_data:
+    description: 'Optional JSON overrides for LiveKit runs: agent_name, url, and config'
+    required: false
+  pipecat_data:
+    description: 'Optional JSON overrides for Pipecat runs: pipecat_agent_name, config, and room_properties'
+    required: false
   phone_number:
     description: 'Outbound phone number for testing'
     required: false
@@ -54,6 +64,9 @@ runs:
         AGENT_ID: ${{ inputs.agent_id }}
         SCENARIO_IDS: ${{ inputs.scenario_ids }}
         TAGS: ${{ inputs.tags }}
+        EXECUTION_MODE: ${{ inputs.execution_mode }}
+        LIVEKIT_DATA: ${{ inputs.livekit_data }}
+        PIPECAT_DATA: ${{ inputs.pipecat_data }}
         PHONE_NUMBER: ${{ inputs.phone_number }}
         NAME: ${{ inputs.name }}
         FREQUENCY: ${{ inputs.frequency }}
@@ -69,38 +82,107 @@ runs:
         echo "  API URL: $API_URL"
         echo ""
 
-        PAYLOAD="{\"agent_id\":\"${AGENT_ID}\",\"frequency\":${FREQUENCY}"
+        case "$EXECUTION_MODE" in
+          voice)
+            if [ -n "$LIVEKIT_DATA" ] || [ -n "$PIPECAT_DATA" ]; then
+              echo "Error: provider data is only valid for livekit_v2 or pipecat_v2 runs."
+              exit 1
+            fi
+            PAYLOAD="{\"agent_id\":\"${AGENT_ID}\",\"frequency\":${FREQUENCY}"
 
-        if [ -n "$SCENARIO_IDS" ]; then
-          SCENARIOS_JSON=$(echo "$SCENARIO_IDS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "%s", $i; if(i<NF) printf ","}; printf "]"}')
-          PAYLOAD="${PAYLOAD},\"scenarios\":${SCENARIOS_JSON}"
-          echo "  Scenario IDs: $SCENARIO_IDS"
-        fi
+            if [ -n "$SCENARIO_IDS" ]; then
+              SCENARIOS_JSON=$(echo "$SCENARIO_IDS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "%s", $i; if(i<NF) printf ","}; printf "]"}')
+              PAYLOAD="${PAYLOAD},\"scenarios\":${SCENARIOS_JSON}"
+              echo "  Scenario IDs: $SCENARIO_IDS"
+            fi
 
-        if [ -n "$TAGS" ]; then
-          TAGS_JSON=$(echo "$TAGS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "\"%s\"", $i; if(i<NF) printf ","}; printf "]"}')
-          PAYLOAD="${PAYLOAD},\"tags\":${TAGS_JSON}"
-          echo "  Tags: $TAGS"
-        fi
+            if [ -n "$TAGS" ]; then
+              TAGS_JSON=$(echo "$TAGS" | awk -F',' '{printf "["; for(i=1; i<=NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); printf "\"%s\"", $i; if(i<NF) printf ","}; printf "]"}')
+              PAYLOAD="${PAYLOAD},\"tags\":${TAGS_JSON}"
+              echo "  Tags: $TAGS"
+            fi
 
-        if [ -n "$PHONE_NUMBER" ]; then
-          PAYLOAD="${PAYLOAD},\"outbound_phone_number\":\"${PHONE_NUMBER}\""
-          echo "  Phone Number: $PHONE_NUMBER"
-        fi
+            if [ -n "$PHONE_NUMBER" ]; then
+              PAYLOAD="${PAYLOAD},\"outbound_phone_number\":\"${PHONE_NUMBER}\""
+              echo "  Phone Number: $PHONE_NUMBER"
+            fi
 
-        if [ -n "$NAME" ]; then
-          ESCAPED_NAME=$(echo "$NAME" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
-          PAYLOAD="${PAYLOAD},\"name\":${ESCAPED_NAME}"
-          echo "  Run Name: $NAME"
-        fi
+            if [ -n "$NAME" ]; then
+              ESCAPED_NAME=$(echo "$NAME" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+              PAYLOAD="${PAYLOAD},\"name\":${ESCAPED_NAME}"
+              echo "  Run Name: $NAME"
+            fi
 
-        PAYLOAD="${PAYLOAD}}"
+            PAYLOAD="${PAYLOAD}}"
+            FULL_URL="${API_URL}/test_framework/v1/scenarios/run_scenarios/"
+            ;;
+          livekit_v2|pipecat_v2)
+            if [ -n "$TAGS" ]; then
+              echo "Error: tags are not supported for $EXECUTION_MODE. Use scenario_ids instead."
+              exit 1
+            fi
+            if [ -n "$PHONE_NUMBER" ]; then
+              echo "Error: phone_number is only valid for voice runs."
+              exit 1
+            fi
+            if [ -z "$SCENARIO_IDS" ]; then
+              echo "Error: scenario_ids is required for livekit_v2."
+              exit 1
+            fi
+
+            if ! WEBRTC_SCENARIOS_JSON=$(printf '%s' "$SCENARIO_IDS" | python3 -c 'import json, sys; ids = [item.strip() for item in sys.stdin.read().split(",") if item.strip()]; assert ids and all(item.isdigit() for item in ids), "scenario_ids must contain numeric IDs"; print(json.dumps([{"scenario": int(item)} for item in ids], separators=(",", ":")))'); then
+              echo "Error: scenario_ids must be a comma-separated list of numeric IDs."
+              exit 1
+            fi
+
+            case "$EXECUTION_MODE" in
+              livekit_v2)
+                if [ -n "$PIPECAT_DATA" ]; then
+                  echo "Error: pipecat_data is only valid for pipecat_v2 runs."
+                  exit 1
+                fi
+                PROVIDER_DATA_NAME="livekit_data"
+                PROVIDER_DATA="$LIVEKIT_DATA"
+                FULL_URL="${API_URL}/test_framework/v1/scenarios-external/run_scenarios_livekit_v2/"
+                ;;
+              pipecat_v2)
+                if [ -n "$LIVEKIT_DATA" ]; then
+                  echo "Error: livekit_data is only valid for livekit_v2 runs."
+                  exit 1
+                fi
+                PROVIDER_DATA_NAME="pipecat_data"
+                PROVIDER_DATA="$PIPECAT_DATA"
+                FULL_URL="${API_URL}/test_framework/v1/scenarios/run_scenarios_pipecat_v2/"
+                ;;
+            esac
+
+            PAYLOAD="{\"agent\":\"${AGENT_ID}\",\"frequency\":${FREQUENCY},\"scenarios\":${WEBRTC_SCENARIOS_JSON}"
+            if [ -n "$PROVIDER_DATA" ]; then
+              if ! PROVIDER_DATA_JSON=$(printf '%s' "$PROVIDER_DATA" | python3 -c 'import json, sys; value = json.load(sys.stdin); assert isinstance(value, dict), "provider data must be a JSON object"; print(json.dumps(value, separators=(",", ":")))'); then
+                echo "Error: ${PROVIDER_DATA_NAME} must be a JSON object."
+                exit 1
+              fi
+              PAYLOAD="${PAYLOAD},\"${PROVIDER_DATA_NAME}\":${PROVIDER_DATA_JSON}"
+            fi
+            if [ -n "$NAME" ]; then
+              ESCAPED_NAME=$(echo "$NAME" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read().strip()))")
+              PAYLOAD="${PAYLOAD},\"name\":${ESCAPED_NAME}"
+              echo "  Run Name: $NAME"
+            fi
+
+            PAYLOAD="${PAYLOAD}}"
+            echo "  Execution Mode: $EXECUTION_MODE"
+            echo "  Scenario IDs: $SCENARIO_IDS"
+            ;;
+          *)
+            echo "Error: execution_mode must be voice, livekit_v2, or pipecat_v2."
+            exit 1
+            ;;
+        esac
 
         echo ""
         echo "Starting test execution..."
         echo ""
-
-        FULL_URL="${API_URL}/test_framework/v1/scenarios/run_scenarios/"
 
         set +e
         RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \

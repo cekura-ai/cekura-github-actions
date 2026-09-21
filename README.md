@@ -128,6 +128,24 @@ When testing agents that make outbound calls:
     api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
+### Testing LiveKit Cloud Agents
+
+LiveKit runs use the agent's LiveKit credentials configured in Cekura. Pass scenario IDs; tag selection and `phone_number` are only available for voice runs.
+
+```yaml
+- name: Run LiveKit tests
+  uses: cekura-ai/cekura-github-actions@v1.1.0
+  with:
+    agent_id: ${{ vars.AGENT_ID }}
+    scenario_ids: ${{ vars.SCENARIO_IDS }}
+    execution_mode: livekit_v2
+    livekit_data: >-
+      {"agent_name":"production-agent","config":{"empty_timeout":300}}
+    api_key: ${{ secrets.CEKURA_API_KEY }}
+```
+
+`livekit_data` is optional. Its supported keys are `agent_name`, `url`, and `config`; it overrides the agent's saved LiveKit connection settings for that run. Do not put LiveKit API credentials in the workflow.
+
 ### Manual Trigger
 
 Allow manual workflow runs from the Actions tab:
@@ -221,12 +239,14 @@ All inputs for the action:
 | `api_key` | Cekura API Key | Yes | - |
 | `scenario_ids` | Comma-separated scenario IDs (e.g., `123,456,789`) | No* | - |
 | `tags` | Comma-separated tags (e.g., `smoke-test,critical`) | No* | - |
+| `execution_mode` | `voice` or `livekit_v2` | No | `voice` |
+| `livekit_data` | Optional JSON object with LiveKit `agent_name`, `url`, or `config` overrides | No | - |
 | `phone_number` | Outbound phone number for testing | No | - |
 | `api_url` | Cekura API URL | No | `https://api.cekura.ai` |
 | `frequency` | Run each scenario N times | No | `1` |
 | `timeout` | Timeout in seconds | No | `3600` |
 
-*Either `scenario_ids` or `tags` must be provided (or both)
+*Voice runs accept `scenario_ids`, `tags`, or both. LiveKit runs require `scenario_ids`; tags and `phone_number` are not supported.
 
 ## How It Works
 

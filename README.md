@@ -128,6 +128,22 @@ When testing agents that make outbound calls:
     api_key: ${{ secrets.CEKURA_API_KEY }}
 ```
 
+### Running Text Simulations
+
+Set `execution_mode: text` to run scenarios as text/chat simulations instead of voice calls. Scenario IDs and tags work the same as for voice runs.
+
+```yaml
+- name: Run text tests
+  uses: cekura-ai/cekura-github-actions@v1.2.0
+  with:
+    agent_id: ${{ vars.AGENT_ID }}
+    tags: ${{ vars.TAGS }}
+    execution_mode: text
+    api_key: ${{ secrets.CEKURA_API_KEY }}
+```
+
+`websocket_url` is optional and only valid for text runs; it overrides the agent's saved websocket URL for that run. For SMS agents, pass `phone_number` as the outbound number.
+
 ### Testing LiveKit Cloud Agents
 
 LiveKit runs use the agent's LiveKit credentials configured in Cekura. Pass scenario IDs; tag selection and `phone_number` are only available for voice runs.
@@ -257,7 +273,8 @@ All inputs for the action:
 | `api_key` | Cekura API Key | Yes | - |
 | `scenario_ids` | Comma-separated scenario IDs (e.g., `123,456,789`) | No* | - |
 | `tags` | Comma-separated tags (e.g., `smoke-test,critical`) | No* | - |
-| `execution_mode` | `voice`, `livekit_v2`, or `pipecat_v2` | No | `voice` |
+| `execution_mode` | `voice`, `text`, `livekit_v2`, or `pipecat_v2` | No | `voice` |
+| `websocket_url` | Websocket URL override for `text` runs | No | - |
 | `livekit_data` | Optional JSON object with LiveKit `agent_name`, `url`, or `config` overrides | No | - |
 | `pipecat_data` | Optional JSON object with Pipecat `pipecat_agent_name`, `config`, or `room_properties` overrides | No | - |
 | `phone_number` | Outbound phone number for testing | No | - |
@@ -265,7 +282,7 @@ All inputs for the action:
 | `frequency` | Run each scenario N times | No | `1` |
 | `timeout` | Timeout in seconds | No | `3600` |
 
-*Voice runs accept `scenario_ids`, `tags`, or both. LiveKit and Pipecat runs require `scenario_ids`; tags and `phone_number` are not supported.
+*Voice and text runs accept `scenario_ids`, `tags`, or both. LiveKit and Pipecat runs require `scenario_ids`; tags and `phone_number` are not supported.
 
 ## How It Works
 

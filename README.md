@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cekura Run Tests
-        uses: cekura-ai/cekura-github-actions@v1.0.0
+        uses: cekura-ai/cekura-github-actions@v1.2.1
         with:
           agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
           scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
@@ -80,7 +80,7 @@ Test specific scenarios by their IDs:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.0.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -93,7 +93,7 @@ Test all scenarios with specific tags:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.0.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     tags: ${{ vars.TAGS }}
@@ -106,7 +106,7 @@ Combine both approaches:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.0.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -120,7 +120,7 @@ When testing agents that make outbound calls:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.0.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -134,7 +134,7 @@ Set `execution_mode: text` to run scenarios as text/chat simulations instead of 
 
 ```yaml
 - name: Run text tests
-  uses: cekura-ai/cekura-github-actions@v1.2.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     tags: ${{ vars.TAGS }}
@@ -150,7 +150,7 @@ LiveKit runs use the agent's LiveKit credentials configured in Cekura. Pass scen
 
 ```yaml
 - name: Run LiveKit tests
-  uses: cekura-ai/cekura-github-actions@v1.1.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -168,7 +168,7 @@ Pipecat runs use the agent's Pipecat Cloud credentials configured in Cekura. As 
 
 ```yaml
 - name: Run Pipecat tests
-  uses: cekura-ai/cekura-github-actions@v1.1.0
+  uses: cekura-ai/cekura-github-actions@v1.2.1
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@v1.0.0
+        uses: cekura-ai/cekura-github-actions@v1.2.1
         with:
           agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
           scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
@@ -227,7 +227,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@v1.0.0
+        uses: cekura-ai/cekura-github-actions@v1.2.1
         with:
           agent_id: ${{ vars.AGENT_ID }}
           tags: 'regression'
@@ -244,7 +244,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Test Staging
-        uses: cekura-ai/cekura-github-actions@v1.0.0
+        uses: cekura-ai/cekura-github-actions@v1.2.1
         with:
           agent_id: ${{ vars.STAGING_AGENT_ID }}
           tags: 'smoke-test'
@@ -256,7 +256,7 @@ jobs:
     needs: staging-tests
     steps:
       - name: Test Production
-        uses: cekura-ai/cekura-github-actions@v1.0.0
+        uses: cekura-ai/cekura-github-actions@v1.2.1
         with:
           agent_id: ${{ vars.PROD_AGENT_ID }}
           tags: 'smoke-test'
@@ -295,8 +295,10 @@ No additional dependencies or setup steps required - it works out of the box on 
 
 ### Workflow Behavior
 
-- **Success**: If all test runs pass (failed count = 0), the workflow exits successfully ✅
-- **Failure**: If any test runs fail (failed count > 0), the workflow exits with an error ❌
+The action polls every 30 seconds until the result reaches a terminal status: `completed`, `failed`, `timeout` or `cancelled`.
+
+- **Success**: the result is `completed` and every run passed ✅
+- **Failure**: anything else exits with an error ❌ — a run that failed its checks, errored, never connected, or timed out counts as not passed, as does a result that ends `failed`, `timeout` or `cancelled`
 
 This ensures your CI/CD pipeline correctly reflects the state of your agent tests.
 

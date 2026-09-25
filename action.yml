@@ -323,8 +323,9 @@ runs:
 
           echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
 
-          # `completed` means at least one run finished, not that runs passed: pass only
-          # when every run passed.
+          # A result turns terminal only once every run has ended, and is then `completed`
+          # if any run completed — even if runs failed their checks or others errored.
+          # So `completed` alone is not a pass: require every run to have passed.
           if [ "$STATUS" = "completed" ] && [ "$TOTAL_RUNS" -gt 0 ] && [ "$SUCCESS_RUNS" -eq "$TOTAL_RUNS" ]; then
             PASSED=true
             STATUS_MESSAGE="✅ All tests passed successfully"

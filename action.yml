@@ -286,171 +286,100 @@ runs:
 
           echo "  [${TIME_STR}] Status: $STATUS"
 
-          if [ "$STATUS" = "completed" ]; then
-            echo ""
-            echo "=========================================="
-            echo "Test execution completed"
-            echo "=========================================="
-            echo ""
+          # Result statuses that end polling (backend TERMINAL_RESULT_STATUSES).
+          case "$STATUS" in
+            completed|failed|timeout|cancelled) ;;
+            *) sleep $POLL_INTERVAL; continue ;;
+          esac
 
-            TOTAL_DURATION=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_duration', 'N/A'))")
-            TOTAL_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_runs_count', 0))")
-            COMPLETED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('completed_runs_count', 0))")
-            SUCCESS_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('success_runs_count', 0))")
-            FAILED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('failed_runs_count', 0))")
-            SUCCESS_RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f\"{data.get('success_rate', 0):.1f}\")")
+          echo ""
+          echo "=========================================="
+          echo "Test execution finished: $STATUS"
+          echo "=========================================="
+          echo ""
 
-            echo "Summary:"
-            echo ""
-            echo "  Total Duration: $TOTAL_DURATION"
-            echo "  Total Runs: $TOTAL_RUNS"
-            echo "  Completed: $COMPLETED_RUNS"
-            echo "  Success: $SUCCESS_RUNS"
-            echo "  Failed: $FAILED_RUNS"
-            echo "  Success Rate: ${SUCCESS_RATE}%"
-            echo ""
+          TOTAL_DURATION=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_duration', 'N/A'))")
+          TOTAL_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_runs_count', 0))")
+          COMPLETED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('completed_runs_count', 0))")
+          SUCCESS_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('success_runs_count', 0))")
+          SUCCESS_RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f\"{data.get('success_rate', 0):.1f}\")")
+          # The API's failed_runs_count counts only runs that finished and failed their checks;
+          # runs that errored, timed out, or were cancelled are in neither count. Count from passes.
+          NOT_PASSED_RUNS=$((TOTAL_RUNS - SUCCESS_RUNS))
 
-            echo "Scenarios:"
-            echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
-            echo ""
+          echo "Summary:"
+          echo ""
+          echo "  Total Duration: $TOTAL_DURATION"
+          echo "  Total Runs: $TOTAL_RUNS"
+          echo "  Completed: $COMPLETED_RUNS"
+          echo "  Passed: $SUCCESS_RUNS"
+          echo "  Did Not Pass: $NOT_PASSED_RUNS"
+          echo "  Success Rate: ${SUCCESS_RATE}%"
+          echo ""
 
-            # Always set result_id output
-            echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
+          echo "Scenarios:"
+          echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
+          echo ""
 
-            # Determine status message based on results
-            if [ "$FAILED_RUNS" -gt 0 ]; then
-              STATUS_MESSAGE="❌ Test execution completed with failures"
-              SUMMARY_STATUS="❌ Tests Failed"
-            else
-              STATUS_MESSAGE="✅ All tests passed successfully"
-              SUMMARY_STATUS="✅ All Tests Passed"
-            fi
+          echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
 
-            # Generate shareable link
-            echo "Generating shareable link..."
-            EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
-            SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
-
-            SHAREABLE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
-              -H "X-CEKURA-API-KEY: ${API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "${SHAREABLE_PAYLOAD}")
-
-            SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
-            SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
-
-            # Always write summary
-            echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "$SUMMARY_STATUS" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
-            echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
-            echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
-            echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
-            echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
-            echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
-              RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
-              if [ -n "$RESULT_URL" ]; then
-                echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
-                echo ""
-                echo "📊 View Results: $RESULT_URL"
-                echo ""
-                echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "Warning: Could not extract shareable link from response"
-              fi
-            else
-              echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
-            fi
-
-            # Output status and exit with appropriate code
-            echo "$STATUS_MESSAGE"
-            if [ "$FAILED_RUNS" -gt 0 ]; then
-              exit 1
-            fi
-            exit 0
-          elif [ "$STATUS" = "failed" ]; then
-            echo ""
-            echo "=========================================="
-            echo "Test execution failed"
-            echo "=========================================="
-            echo ""
-
-            TOTAL_DURATION=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_duration', 'N/A'))")
-            TOTAL_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('total_runs_count', 0))")
-            COMPLETED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('completed_runs_count', 0))")
-            SUCCESS_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('success_runs_count', 0))")
-            FAILED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('failed_runs_count', 0))")
-            SUCCESS_RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f\"{data.get('success_rate', 0):.1f}\")")
-
-            echo "Summary:"
-            echo ""
-            echo "  Total Duration: $TOTAL_DURATION"
-            echo "  Total Runs: $TOTAL_RUNS"
-            echo "  Completed: $COMPLETED_RUNS"
-            echo "  Success: $SUCCESS_RUNS"
-            echo "  Failed: $FAILED_RUNS"
-            echo "  Success Rate: ${SUCCESS_RATE}%"
-            echo ""
-
-            echo "Scenarios:"
-            echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
-            echo ""
-
-            # Always set result_id output
-            echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
-
-            # Generate shareable link
-            echo "Generating shareable link..."
-            EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
-            SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
-
-            SHAREABLE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
-              -H "X-CEKURA-API-KEY: ${API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "${SHAREABLE_PAYLOAD}")
-
-            SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
-            SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
-
-            # Always write summary
-            echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Test Execution Failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
-            echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
-            echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
-            echo "- Success: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
-            echo "- Failed: $FAILED_RUNS" >> $GITHUB_STEP_SUMMARY
-            echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
-              RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
-              if [ -n "$RESULT_URL" ]; then
-                echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
-                echo ""
-                echo "📊 View Results: $RESULT_URL"
-                echo ""
-                echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "Warning: Could not extract shareable link from response"
-              fi
-            else
-              echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
-            fi
-
-            exit 1
+          # `completed` means at least one run finished, not that runs passed: pass only
+          # when every run passed.
+          if [ "$STATUS" = "completed" ] && [ "$TOTAL_RUNS" -gt 0 ] && [ "$SUCCESS_RUNS" -eq "$TOTAL_RUNS" ]; then
+            PASSED=true
+            STATUS_MESSAGE="✅ All tests passed successfully"
+            SUMMARY_STATUS="✅ All Tests Passed"
+          else
+            PASSED=false
+            STATUS_MESSAGE="❌ Tests did not pass (status: $STATUS, ${NOT_PASSED_RUNS} of ${TOTAL_RUNS} runs did not pass)"
+            SUMMARY_STATUS="❌ Tests Failed (status: $STATUS)"
           fi
 
-          sleep $POLL_INTERVAL
+          echo "Generating shareable link..."
+          EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
+          SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
+
+          SHAREABLE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${SHAREABLE_PAYLOAD}")
+
+          SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
+          SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
+
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$SUMMARY_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Summary:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Total Duration: $TOTAL_DURATION" >> $GITHUB_STEP_SUMMARY
+          echo "- Total Runs: $TOTAL_RUNS" >> $GITHUB_STEP_SUMMARY
+          echo "- Passed: $SUCCESS_RUNS" >> $GITHUB_STEP_SUMMARY
+          echo "- Did Not Pass: $NOT_PASSED_RUNS" >> $GITHUB_STEP_SUMMARY
+          echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
+            RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
+            if [ -n "$RESULT_URL" ]; then
+              echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
+              echo ""
+              echo "📊 View Results: $RESULT_URL"
+              echo ""
+              echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "Warning: Could not extract shareable link from response"
+            fi
+          else
+            echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
+          fi
+
+          echo "$STATUS_MESSAGE"
+          if [ "$PASSED" = true ]; then
+            exit 0
+          fi
+          exit 1
         done
 
 branding:

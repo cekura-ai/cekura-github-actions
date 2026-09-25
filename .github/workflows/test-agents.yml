@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cekura Run Tests
-        uses: cekura-ai/cekura-github-actions@v1.0.0
+        uses: cekura-ai/cekura-github-actions@v1.2.1
         with:
           agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
           scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}

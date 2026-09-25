@@ -303,7 +303,7 @@ runs:
           COMPLETED_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('completed_runs_count', 0))")
           SUCCESS_RUNS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('success_runs_count', 0))")
           SUCCESS_RATE=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(f\"{data.get('success_rate', 0):.1f}\")")
-          # The API's failed_runs_count counts only runs that finished and failed their checks;
+          # The API's failed_runs_count counts only runs that completed and failed their checks;
           # runs that errored, timed out, or were cancelled are in neither count. Count from passes.
           NOT_PASSED_RUNS=$((TOTAL_RUNS - SUCCESS_RUNS))
 

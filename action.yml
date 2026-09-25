@@ -77,6 +77,63 @@ runs:
         TIMEOUT: ${{ inputs.timeout }}
       run: |
         set -e
+
+        # GitHub sends SIGINT/SIGTERM when a workflow is cancelled. Once a
+        # result exists, make a best-effort request to end every Cekura run
+        # before the runner tears this process down.
+        RESULT_ID=""
+        RESULT_IS_TERMINAL=false
+        CLEANUP_ATTEMPTED=false
+
+        cleanup_cekura_result() {
+          if [ -z "$RESULT_ID" ] || [ "$RESULT_IS_TERMINAL" = true ] || [ "$CLEANUP_ATTEMPTED" = true ]; then
+            return 0
+          fi
+
+          CLEANUP_ATTEMPTED=true
+          echo "Requesting Cekura to end active runs for result $RESULT_ID..."
+
+          set +e
+          # GitHub gives a cancelled step only a short grace period before it
+          # escalates to SIGTERM, so keep this best-effort request bounded.
+          CLEANUP_RESPONSE=$(curl --connect-timeout 3 --max-time 5 -sS -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/results/${RESULT_ID}/end_calls/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}")
+          CLEANUP_CURL_EXIT_CODE=$?
+          set -e
+
+          if [ $CLEANUP_CURL_EXIT_CODE -ne 0 ]; then
+            echo "Warning: Could not request Cekura cleanup (curl exit code: $CLEANUP_CURL_EXIT_CODE)"
+            return 0
+          fi
+
+          CLEANUP_HTTP_CODE=$(echo "$CLEANUP_RESPONSE" | tail -n1)
+          if [ "$CLEANUP_HTTP_CODE" = "200" ] || [ "$CLEANUP_HTTP_CODE" = "201" ] || [ "$CLEANUP_HTTP_CODE" = "202" ] || [ "$CLEANUP_HTTP_CODE" = "204" ]; then
+            echo "Cekura cleanup request accepted."
+          else
+            echo "Warning: Cekura cleanup returned HTTP $CLEANUP_HTTP_CODE"
+          fi
+        }
+
+        handle_cancellation() {
+          local signal="$1"
+          echo ""
+          echo "Workflow cancellation received ($signal). Ending active Cekura runs..."
+          cleanup_cekura_result
+          trap - EXIT INT TERM
+          if [ "$signal" = "INT" ]; then
+            exit 130
+          fi
+          exit 143
+        }
+
+        # The EXIT trap also covers the action's own timeout and unexpected
+        # failures after the result was created. It is a no-op for terminal
+        # results and before Cekura returned a result ID.
+        trap cleanup_cekura_result EXIT
+        trap 'handle_cancellation INT' INT
+        trap 'handle_cancellation TERM' TERM
+
         echo "=========================================="
         echo "Cekura Test Framework"
         echo "=========================================="
@@ -291,6 +348,8 @@ runs:
             completed|failed|timeout|cancelled) ;;
             *) sleep $POLL_INTERVAL; continue ;;
           esac
+
+          RESULT_IS_TERMINAL=true
 
           echo ""
           echo "=========================================="

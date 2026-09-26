@@ -1,0 +1,35 @@
+name: Validate Timeout Result Output
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This intentionally times out after the first 30-second poll interval.
+      # It validates the local Action source on this branch, not a released tag.
+      - name: Run a short Cekura evaluation
+        id: run-tests
+        continue-on-error: true
+        uses: ./
+        with:
+          agent_id: ${{ vars.AGENT_ID }}
+          scenario_ids: 11924
+          timeout: 10
+          api_key: ${{ secrets.CEKURA_API_KEY }}
+
+      - name: Verify timeout result output
+        if: always()
+        env:
+          ACTION_OUTCOME: ${{ steps.run-tests.outcome }}
+          RESULT_ID: ${{ steps.run-tests.outputs.result_id }}
+          RESULT_URL: ${{ steps.run-tests.outputs.result_url }}
+        run: |
+          test "$ACTION_OUTCOME" = "failure"
+          test -n "$RESULT_ID"
+          test -n "$RESULT_URL"
+          echo "Cekura result ID: $RESULT_ID"
+          echo "Cekura result URL: $RESULT_URL"

@@ -77,6 +77,169 @@ runs:
         TIMEOUT: ${{ inputs.timeout }}
       run: |
         set -e
+
+        # GitHub cancels a step (workflow cancel or job timeout-minutes) by
+        # sending SIGINT to this shell only, then SIGTERM 7.5s later and
+        # SIGKILL 2.5s after that. Bash defers traps until a foreground child
+        # exits, so every wait below must stay short or be interruptible.
+        RESULT_ID=""
+        RESULT_IS_TERMINAL=false
+        UNFINISHED_REPORTED=false
+        RESULT_LINK_PUBLISHED=false
+        BACKGROUND_PID=""
+
+        # Run a command in the background and `wait` for it: `wait` returns as
+        # soon as a trapped signal arrives, whereas a foreground command would
+        # hold the cancellation trap until it finished. Returns its exit code.
+        run_interruptible() {
+          local exit_code=0
+          "$@" &
+          BACKGROUND_PID=$!
+          wait "$BACKGROUND_PID" || exit_code=$?
+          BACKGROUND_PID=""
+          return $exit_code
+        }
+
+        cleanup_cekura_result() {
+          echo "Requesting Cekura to end active runs for result $RESULT_ID..."
+
+          set +e
+          CLEANUP_RESPONSE=$(curl --connect-timeout 3 --max-time 5 -sS -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/results/${RESULT_ID}/end_calls/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}")
+          CLEANUP_CURL_EXIT_CODE=$?
+          set -e
+
+          if [ $CLEANUP_CURL_EXIT_CODE -ne 0 ]; then
+            echo "Warning: Could not request Cekura cleanup (curl exit code: $CLEANUP_CURL_EXIT_CODE)"
+            CLEANUP_OUTCOME="Could not reach Cekura to end active runs (curl exit code: $CLEANUP_CURL_EXIT_CODE); end them from the dashboard."
+            return 0
+          fi
+
+          CLEANUP_HTTP_CODE=$(echo "$CLEANUP_RESPONSE" | tail -n1)
+          case "$CLEANUP_HTTP_CODE" in
+            200|201|202|204)
+              echo "Cekura cleanup request accepted."
+              CLEANUP_OUTCOME="Requested Cekura to end active runs."
+              ;;
+            *)
+              echo "Warning: Cekura cleanup returned HTTP $CLEANUP_HTTP_CODE"
+              CLEANUP_OUTCOME="Cekura returned HTTP $CLEANUP_HTTP_CODE when asked to end active runs; end them from the dashboard."
+              ;;
+          esac
+        }
+
+        # $1 = curl --max-time for the request, kept short on cancellation.
+        publish_result_link() {
+          if [ -z "$RESULT_ID" ] || [ "$RESULT_LINK_PUBLISHED" = true ]; then
+            return 0
+          fi
+
+          RESULT_LINK_PUBLISHED=true
+          echo "Generating shareable link..."
+          EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
+          SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
+
+          set +e
+          SHAREABLE_RESPONSE=$(curl --connect-timeout "$1" --max-time "$1" -sS -w "\n%{http_code}" -X POST \
+            "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
+            -H "X-CEKURA-API-KEY: ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${SHAREABLE_PAYLOAD}")
+          SHAREABLE_CURL_EXIT_CODE=$?
+          set -e
+
+          if [ $SHAREABLE_CURL_EXIT_CODE -ne 0 ]; then
+            echo "Warning: Could not generate shareable link (curl exit code: $SHAREABLE_CURL_EXIT_CODE)"
+            return 0
+          fi
+
+          SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
+          SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
+          if [ "$SHAREABLE_HTTP_CODE" != "200" ] && [ "$SHAREABLE_HTTP_CODE" != "201" ]; then
+            echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
+            return 0
+          fi
+
+          RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))" 2>/dev/null) || RESULT_URL=""
+          if [ -z "$RESULT_URL" ]; then
+            echo "Warning: Could not extract shareable link from response"
+            return 0
+          fi
+
+          echo "result_url=${RESULT_URL}" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "📊 View Results: $RESULT_URL"
+          echo ""
+          echo "[📊 View Full Results]($RESULT_URL)" >> "$GITHUB_STEP_SUMMARY"
+        }
+
+        # Summarise a result the action stopped watching before it finished.
+        # $1 = summary headline, $2 = true to end the active Cekura runs,
+        # $3 = shareable-link request timeout in seconds.
+        report_unfinished_result() {
+          if [ -z "$RESULT_ID" ] || [ "$RESULT_IS_TERMINAL" = true ] || [ "$UNFINISHED_REPORTED" = true ]; then
+            return 0
+          fi
+          UNFINISHED_REPORTED=true
+
+          # Write the result ID before any network call so it survives a kill.
+          {
+            echo "## Test Results"
+            echo ""
+            echo "$1"
+            echo ""
+            echo "- Result ID: $RESULT_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$2" = true ]; then
+            cleanup_cekura_result
+            echo "- $CLEANUP_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Cekura runs were left running; open the results to see how they finish." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          publish_result_link "$3"
+        }
+
+        handle_cancellation() {
+          local signal="$1"
+          if [ -n "$BACKGROUND_PID" ]; then
+            kill "$BACKGROUND_PID" 2>/dev/null || true
+          fi
+
+          # A signal that arrives during the create request is handled right
+          # after curl returns, before RESULT_ID is parsed: recover it here.
+          if [ -z "$RESULT_ID" ] && [ -n "${RESPONSE:-}" ]; then
+            case "$(echo "$RESPONSE" | tail -n1)" in
+              200|201)
+                RESULT_ID=$(echo "$RESPONSE" | sed '$d' | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))" 2>/dev/null) || RESULT_ID=""
+                ;;
+            esac
+            if [ -n "$RESULT_ID" ]; then
+              echo "result_id=${RESULT_ID}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          echo ""
+          echo "Workflow cancellation received ($signal). Ending active Cekura runs..."
+          # end_calls (<=5s) + shareable link (<=2s) fit inside the 7.5s SIGINT grace.
+          report_unfinished_result "⚠️ Workflow Cancelled Before Tests Finished" true 2
+          trap - EXIT INT TERM
+          if [ "$signal" = "INT" ]; then
+            exit 130
+          fi
+          exit 143
+        }
+
+        # Any other early exit after the result exists (e.g. the status
+        # endpoint keeps failing) still reports the result, but leaves the
+        # runs alone: they finish normally and stay visible in Cekura.
+        trap 'report_unfinished_result "❌ Stopped Monitoring Before Tests Finished" false 15' EXIT
+        trap 'handle_cancellation INT' INT
+        trap 'handle_cancellation TERM' TERM
+
         echo "=========================================="
         echo "Cekura Test Framework"
         echo "=========================================="
@@ -205,7 +368,8 @@ runs:
         echo ""
 
         set +e
-        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+        # Bounded so a hung connection cannot hold off a cancellation forever.
+        RESPONSE=$(curl --connect-timeout 10 --max-time 120 -s -w "\n%{http_code}" -X POST \
           "$FULL_URL" \
           -H "X-CEKURA-API-KEY: ${API_KEY}" \
           -H "Content-Type: application/json" \
@@ -243,10 +407,18 @@ runs:
         echo "  Result ID: $RESULT_ID"
         echo ""
 
+        # Set this immediately so downstream steps can report the result even
+        # if polling later times out or the runner stops unexpectedly.
+        echo "result_id=${RESULT_ID}" >> "$GITHUB_OUTPUT"
+
         echo "Monitoring test execution..."
         echo ""
         START_TIME=$(date +%s)
         POLL_INTERVAL=30
+        POLL_RETRY_INTERVAL=10
+        MAX_POLL_ATTEMPTS=3
+        POLL_FAILURES=0
+        STATUS_RESPONSE_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/cekura-status.XXXXXX")
 
         while true; do
           CURRENT_TIME=$(date +%s)
@@ -255,25 +427,51 @@ runs:
           if [ $ELAPSED -gt $TIMEOUT ]; then
             echo ""
             echo "Error: Test execution timeout after ${TIMEOUT} seconds"
+            report_unfinished_result "❌ Test Execution Timed Out" true 15
             exit 1
           fi
 
-          STATUS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET \
+          set +e
+          run_interruptible curl --connect-timeout 5 --max-time 30 -sS -w "\n%{http_code}" -X GET \
             "${API_URL}/test_framework/v1/results/${RESULT_ID}/" \
-            -H "X-CEKURA-API-KEY: ${API_KEY}")
+            -H "X-CEKURA-API-KEY: ${API_KEY}" > "$STATUS_RESPONSE_FILE"
+          STATUS_CURL_EXIT_CODE=$?
+          set -e
+          STATUS_RESPONSE=$(cat "$STATUS_RESPONSE_FILE")
 
           STATUS_HTTP_CODE=$(echo "$STATUS_RESPONSE" | tail -n1)
           STATUS_BODY=$(echo "$STATUS_RESPONSE" | sed '$d')
 
-          if [ "$STATUS_HTTP_CODE" != "200" ]; then
+          if [ $STATUS_CURL_EXIT_CODE -ne 0 ] || [ "$STATUS_HTTP_CODE" != "200" ]; then
+            POLL_FAILURES=$((POLL_FAILURES + 1))
+            if [ $STATUS_CURL_EXIT_CODE -ne 0 ]; then
+              POLL_ERROR="curl exit code: $STATUS_CURL_EXIT_CODE"
+              POLL_RETRYABLE=true
+            else
+              POLL_ERROR="HTTP $STATUS_HTTP_CODE"
+              case "$STATUS_HTTP_CODE" in
+                408|429|5??) POLL_RETRYABLE=true ;;
+                *) POLL_RETRYABLE=false ;;
+              esac
+            fi
+
+            # Ride out transient network and server errors; auth and
+            # not-found errors will not fix themselves.
+            if [ "$POLL_RETRYABLE" = true ] && [ $POLL_FAILURES -lt $MAX_POLL_ATTEMPTS ]; then
+              echo "  Warning: Failed to check test status ($POLL_ERROR), attempt ${POLL_FAILURES}/${MAX_POLL_ATTEMPTS}; retrying in ${POLL_RETRY_INTERVAL}s"
+              run_interruptible sleep "$POLL_RETRY_INTERVAL" || true
+              continue
+            fi
+
             echo ""
-            echo "Error: Failed to check test status (HTTP $STATUS_HTTP_CODE)"
+            echo "Error: Failed to check test status ($POLL_ERROR)"
             echo ""
             echo "Response:"
             echo "$STATUS_BODY" | python3 -m json.tool 2>/dev/null || echo "$STATUS_BODY"
             exit 1
           fi
 
+          POLL_FAILURES=0
           STATUS=$(echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('status', ''))")
 
           MINUTES=$((ELAPSED / 60))
@@ -289,8 +487,10 @@ runs:
           # Result statuses that end polling (backend TERMINAL_RESULT_STATUSES).
           case "$STATUS" in
             completed|failed|timeout|cancelled) ;;
-            *) sleep $POLL_INTERVAL; continue ;;
+            *) run_interruptible sleep "$POLL_INTERVAL" || true; continue ;;
           esac
+
+          RESULT_IS_TERMINAL=true
 
           echo ""
           echo "=========================================="
@@ -321,8 +521,6 @@ runs:
           echo "$STATUS_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); [print(f\"  - {s.get('name', 'Unknown')} (ID: {s.get('id', 'N/A')})\") for s in data.get('scenarios', [])]"
           echo ""
 
-          echo "result_id=${RESULT_ID}" >> $GITHUB_OUTPUT
-
           # A result turns terminal only once every run has ended, and is then `completed`
           # if any run completed — even if runs failed their checks or others errored.
           # So `completed` alone is not a pass: require every run to have passed.
@@ -336,19 +534,6 @@ runs:
             SUMMARY_STATUS="❌ Tests Failed (status: $STATUS)"
           fi
 
-          echo "Generating shareable link..."
-          EXPIRE_AT=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT%H:%M:%SZ")
-          SHAREABLE_PAYLOAD="{\"expire_at\":\"${EXPIRE_AT}\"}"
-
-          SHAREABLE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "${API_URL}/test_framework/v1/results/${RESULT_ID}/create_shareable_link_token/" \
-            -H "X-CEKURA-API-KEY: ${API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "${SHAREABLE_PAYLOAD}")
-
-          SHAREABLE_HTTP_CODE=$(echo "$SHAREABLE_RESPONSE" | tail -n1)
-          SHAREABLE_BODY=$(echo "$SHAREABLE_RESPONSE" | sed '$d')
-
           echo "## Test Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "$SUMMARY_STATUS" >> $GITHUB_STEP_SUMMARY
@@ -361,20 +546,7 @@ runs:
           echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "$SHAREABLE_HTTP_CODE" = "200" ] || [ "$SHAREABLE_HTTP_CODE" = "201" ]; then
-            RESULT_URL=$(echo "$SHAREABLE_BODY" | python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('shareable_link', ''))")
-            if [ -n "$RESULT_URL" ]; then
-              echo "result_url=${RESULT_URL}" >> $GITHUB_OUTPUT
-              echo ""
-              echo "📊 View Results: $RESULT_URL"
-              echo ""
-              echo "[📊 View Full Results]($RESULT_URL)" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "Warning: Could not extract shareable link from response"
-            fi
-          else
-            echo "Warning: Failed to generate shareable link (HTTP $SHAREABLE_HTTP_CODE)"
-          fi
+          publish_result_link 15
 
           echo "$STATUS_MESSAGE"
           if [ "$PASSED" = true ]; then

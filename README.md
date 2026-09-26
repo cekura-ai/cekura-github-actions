@@ -300,6 +300,14 @@ The action polls every 30 seconds until the result reaches a terminal status: `c
 - **Success**: the result is `completed` and every run passed ✅
 - **Failure**: anything else exits with an error ❌ — a run that failed its checks, errored, never connected, or timed out counts as not passed, as does a result that ends `failed`, `timeout` or `cancelled`
 
+If the status check fails with a network error, `408`, `429` or `5xx`, the action tries up to 3 times, 10 seconds apart, before failing.
+
+If the action stops watching a result before it finishes, the job summary still shows the result ID and a shareable results link, and `result_id` / `result_url` are still set as outputs:
+
+- **Action timeout** (the `timeout` input): the action asks Cekura to end the active runs, then fails.
+- **Workflow cancelled or job `timeout-minutes` reached**: GitHub gives the step about 10 seconds to stop, so the action makes a best-effort request to end the active runs and exits.
+- **Status checks keep failing**: the action fails but leaves the runs going, so they finish normally and stay visible in Cekura.
+
 This ensures your CI/CD pipeline correctly reflects the state of your agent tests.
 
 ## Complete Documentation

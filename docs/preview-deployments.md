@@ -154,7 +154,10 @@ jobs:
 yourself, pass `image` and `image_credentials` instead.
 
 It warms one agent per call the suite places at once (from `spec`), up to 50,
-and waits until all of them are up, so no call waits on a cold start. Those
+and waits until all of them are up, so no call waits on a cold start. It then
+waits `settle_seconds` more (default 180) before the suite dials, because a
+revision that has only just come up can still turn its first sessions away;
+set it to `0` to skip. Those
 agents are billed by Pipecat Cloud for as long as the preview exists — minutes,
 normally. Set `max_agents` (and `min_agents`) to keep a large suite within your
 plan. Ready means the revision this deploy asked

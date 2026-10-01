@@ -57,6 +57,10 @@ inputs:
     description: 'Seconds to wait for the new revision to be ready'
     required: false
     default: '600'
+  settle_seconds:
+    description: 'Seconds to wait after the revision is ready, before the suite dials it, so a freshly deployed preview has settled. 0 skips it.'
+    required: false
+    default: '180'
   api_url:
     description: 'Pipecat Cloud API URL'
     required: false
@@ -116,3 +120,20 @@ runs:
         MIN_AGENTS: ${{ steps.plan.outputs.min_agents }}
         WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
       run: python3 "$GITHUB_ACTION_PATH/../preview.py" wait-ready
+
+    # Ready is not the same as settled: a revision that has only just come up
+    # can still answer its first session starts busy. Waiting out a fixed
+    # window is what keeps the first calls from failing for that reason.
+    - name: Let the preview settle
+      shell: bash
+      env:
+        SETTLE_SECONDS: ${{ inputs.settle_seconds }}
+      run: |
+        set -euo pipefail
+        case "$SETTLE_SECONDS" in
+          ''|*[!0-9]*) echo "::error::settle_seconds must be a whole number, got '$SETTLE_SECONDS'"; exit 1 ;;
+        esac
+        if [ "$SETTLE_SECONDS" -gt 0 ]; then
+          echo "Waiting ${SETTLE_SECONDS}s for the preview to settle"
+          sleep "$SETTLE_SECONDS"
+        fi

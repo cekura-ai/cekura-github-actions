@@ -44,6 +44,12 @@ inputs:
   agent_profile:
     description: 'Pipecat Cloud agent profile'
     required: false
+  krisp_viva:
+    description: 'Krisp VIVA audio filter model (e.g. tel, pro), matching krisp_viva in pcc-deploy.toml. Omit to disable.'
+    required: false
+  max_session_duration:
+    description: 'Max session seconds, matching pcc-deploy.toml. Omit for the org default.'
+    required: false
   spec:
     description: 'Cekura suite file. When max_agents is unset, warm one agent per call the suite places at once.'
     required: false
@@ -105,6 +111,8 @@ runs:
         secret-set: ${{ inputs.secret_set }}
         region: ${{ inputs.region }}
         agent-profile: ${{ inputs.agent_profile }}
+        krisp-viva: ${{ inputs.krisp_viva }}
+        max-session-duration: ${{ inputs.max_session_duration }}
         min-agents: ${{ steps.plan.outputs.min_agents }}
         max-agents: ${{ steps.plan.outputs.max_agents }}
         # Its check passes on an update while the old revision still serves;

@@ -90,6 +90,15 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("registered as 'meridian-support', not 'bot-pr-7'", proc.stderr)
         self.assert_stopped()
 
+    def test_node_worker_is_checked_by_its_camel_case_name(self):
+        # @livekit/agents logs pino JSON: "agentName" beside "agentNameIsEnv".
+        good = self.run_cmd("start", COMMAND="sh -c 'echo \"{\\\"agentNameIsEnv\\\":true,\\\"agentName\\\":\\\"bot-pr-7\\\",\\\"msg\\\":\\\"registered worker\\\"}\"; sleep 60'")
+        self.assertEqual(good.returncode, 0, good.stderr)
+        self.assertIn("registered with LiveKit as bot-pr-7", good.stdout)
+        bad = self.run_cmd("start", COMMAND="sh -c 'echo \"{\\\"agentNameIsEnv\\\":false,\\\"agentName\\\":\\\"support\\\",\\\"msg\\\":\\\"registered worker\\\"}\"; sleep 60'")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("registered as 'support'", bad.stderr)
+
     def test_worker_with_no_agent_name_is_stopped(self):
         proc = self.registers_as("")
         self.assertEqual(proc.returncode, 1)

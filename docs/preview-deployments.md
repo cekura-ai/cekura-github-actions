@@ -150,7 +150,10 @@ jobs:
 ```
 
 `deploy-preview` builds the image in Pipecat Cloud from the checkout by default
-(`cloud_build`, `build_context`, `dockerfile`). To deploy an image you built
+(`cloud_build`, `build_context`, `dockerfile` — set both when the bot is not at
+the repository root). Carry over `region`, `agent_profile`, `krisp_viva` and
+`max_session_duration` from `pcc-deploy.toml` so the preview runs like
+production. To deploy an image you built
 yourself, pass `image` and `image_credentials` instead.
 
 It warms one agent per call the suite places at once (from `spec`), up to 50,
@@ -172,7 +175,8 @@ it registers with your project exactly as a deployed one would; there is no
 deployment to clean up, and no LiveKit plan quota is used.
 
 It is named through `LIVEKIT_AGENT_NAME_OVERRIDE`, which livekit-agents **1.6+**
-applies over any name set in code, and `LIVEKIT_AGENT_NAME`. The action reads
+(Python) and `@livekit/agents` **1.4.10+** (Node) apply over any name set in
+code, and `LIVEKIT_AGENT_NAME`. The action reads
 the worker's own registration log line and stops it unless it registered as
 exactly `<base>-pr-<number>`. A worker with no name would be dispatched to
 every new room in the project, and one with production's name would join

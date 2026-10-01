@@ -11,7 +11,8 @@ It registers under ``<base>-pr-<number>``, and Cekura dispatches to that name
 with ``livekit_data.agent_name``.
 
 The name reaches the worker two ways: ``LIVEKIT_AGENT_NAME_OVERRIDE``, which
-livekit-agents 1.6+ applies over any name set in code, and the variable named
+livekit-agents 1.6+ (Python) and @livekit/agents 1.4.10+ (Node) apply
+over any name set in code, and the variable named
 by ``AGENT_NAME_ENV`` for older bots that read their name themselves. The
 worker's own "registered worker" log line is then checked: a worker that
 registered under any other name, or none, is stopped at once. With no name it
@@ -33,7 +34,9 @@ from naming import Failure, output, preview_name  # noqa: E402
 
 RESERVED = {"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_AGENT_NAME_OVERRIDE"}
 ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-REGISTERED_NAME = re.compile(r'"agent_name":\s*"([^"]*)"')
+# livekit-agents (Python) logs "agent_name"; @livekit/agents (Node, pino) logs
+# "agentName" beside "agentNameIsEnv", which this must not match.
+REGISTERED_NAME = re.compile(r'"agent_?[nN]ame":\s*"([^"]*)"')
 
 
 def docker(*args, check=True, capture=True):

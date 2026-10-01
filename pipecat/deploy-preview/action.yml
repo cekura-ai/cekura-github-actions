@@ -1,0 +1,118 @@
+name: "Cekura Pipecat Preview Deploy"
+description: "Deploy this pull request's bot to your Pipecat Cloud org as <base>-pr-<number> and wait until that revision is serving"
+author: "Cekura AI"
+
+inputs:
+  api_key:
+    description: 'Pipecat Cloud PRIVATE API key for your org (a repository secret)'
+    required: true
+  agent_name_base:
+    description: 'Base agent name. The preview is deployed as <base>-pr-<number>, never under the base name itself.'
+    required: true
+  pr_number:
+    description: 'Pull request number used in the preview name'
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  secret_set:
+    description: 'Pipecat Cloud secret set with the bot''s runtime secrets. A CI-only set is recommended.'
+    required: true
+  cloud_build:
+    description: 'Build the image in Pipecat Cloud from this checkout. Ignored when image is set.'
+    required: false
+    default: 'true'
+  build_context:
+    description: 'Build context directory (cloud builds)'
+    required: false
+    default: '.'
+  dockerfile:
+    description: 'Dockerfile path, relative to build_context (cloud builds)'
+    required: false
+    default: 'Dockerfile'
+  build_timeout:
+    description: 'Seconds to wait for a cloud build'
+    required: false
+    default: '900'
+  image:
+    description: 'Pre-built image to deploy instead of a cloud build, e.g. ghcr.io/acme/bot:sha'
+    required: false
+  image_credentials:
+    description: 'Pipecat Cloud image pull secret for image'
+    required: false
+  region:
+    description: 'Deployment region (your org default if omitted)'
+    required: false
+  agent_profile:
+    description: 'Pipecat Cloud agent profile'
+    required: false
+  spec:
+    description: 'Cekura suite file. When max_agents is unset, warm one agent per call the suite places at once.'
+    required: false
+  min_agents:
+    description: 'Agents to keep warm (defaults to max_agents)'
+    required: false
+  max_agents:
+    description: 'Maximum agents (defaults to the suite''s call count, else 1)'
+    required: false
+  wait_timeout:
+    description: 'Seconds to wait for the new revision to be ready'
+    required: false
+    default: '600'
+  api_url:
+    description: 'Pipecat Cloud API URL'
+    required: false
+    default: 'https://api.pipecat.daily.co'
+
+outputs:
+  agent_name:
+    description: 'The preview agent name, <base>-pr-<number>. Pass it to run-suite as pipecat_data.pipecat_agent_name.'
+    value: ${{ steps.plan.outputs.agent_name }}
+  build_id:
+    description: 'Pipecat Cloud build ID (cloud builds)'
+    value: ${{ steps.deploy.outputs.build-id }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve preview name and scaling
+      id: plan
+      shell: bash
+      env:
+        AGENT_NAME_BASE: ${{ inputs.agent_name_base }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        SPEC: ${{ inputs.spec }}
+        MIN_AGENTS: ${{ inputs.min_agents }}
+        MAX_AGENTS: ${{ inputs.max_agents }}
+      run: python3 "$GITHUB_ACTION_PATH/../preview.py" plan
+
+    - name: Build and deploy to Pipecat Cloud
+      id: deploy
+      # Pinned to v2.1.3 by commit, so a retag cannot change what deploys.
+      uses: daily-co/pipecat-cloud-deploy-action@04dff07441f4cb870ba00fdb252729d36c809db9
+      with:
+        api-key: ${{ inputs.api_key }}
+        api-url: ${{ inputs.api_url }}
+        agent-name: ${{ steps.plan.outputs.agent_name }}
+        cloud-build: ${{ inputs.image == '' && inputs.cloud_build || 'false' }}
+        build-context: ${{ inputs.build_context }}
+        dockerfile: ${{ inputs.dockerfile }}
+        build-timeout: ${{ inputs.build_timeout }}
+        image: ${{ inputs.image }}
+        image-credentials: ${{ inputs.image_credentials }}
+        secret-set: ${{ inputs.secret_set }}
+        region: ${{ inputs.region }}
+        agent-profile: ${{ inputs.agent_profile }}
+        min-agents: ${{ steps.plan.outputs.min_agents }}
+        max-agents: ${{ steps.plan.outputs.max_agents }}
+        # Its check passes on an update while the old revision still serves;
+        # the next step waits for the revision this deploy asked for.
+        wait-for-ready: 'false'
+
+    - name: Wait for the new revision
+      shell: bash
+      env:
+        PIPECAT_API_KEY: ${{ inputs.api_key }}
+        PIPECAT_API_URL: ${{ inputs.api_url }}
+        AGENT_NAME: ${{ steps.plan.outputs.agent_name }}
+        MIN_AGENTS: ${{ steps.plan.outputs.min_agents }}
+        WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
+      run: python3 "$GITHUB_ACTION_PATH/../preview.py" wait-ready

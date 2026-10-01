@@ -1,0 +1,105 @@
+name: "Cekura LiveKit Preview Worker"
+description: "Build this pull request's LiveKit Agents worker and run it in the runner, registered with your LiveKit project as <base>-pr-<number>"
+author: "Cekura AI"
+
+inputs:
+  livekit_url:
+    description: 'Your LiveKit server URL, wss://... (a repository secret or variable). A CI-only LiveKit project is recommended.'
+    required: true
+  livekit_api_key:
+    description: 'Your LiveKit API key (a repository secret)'
+    required: true
+  livekit_api_secret:
+    description: 'Your LiveKit API secret (a repository secret)'
+    required: true
+  agent_name_base:
+    description: 'Base agent name. The worker registers as <base>-pr-<number>, never under the base name itself.'
+    required: true
+  pr_number:
+    description: 'Pull request number used in the worker''s agent name'
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  agent_name_env:
+    description: 'Environment variable your worker reads its agent_name from'
+    required: false
+    default: 'LIVEKIT_AGENT_NAME'
+  env:
+    description: 'Extra KEY=VALUE lines for the worker, e.g. provider keys from secrets. LIVEKIT_* come from the inputs above.'
+    required: false
+  build_context:
+    description: 'Docker build context'
+    required: false
+    default: '.'
+  dockerfile:
+    description: 'Dockerfile path, relative to build_context'
+    required: false
+    default: 'Dockerfile'
+  image:
+    description: 'Pre-built image to run instead of building this checkout'
+    required: false
+  command:
+    description: 'Command for the container (defaults to the image''s CMD, which should start the worker in production mode)'
+    required: false
+  ready_pattern:
+    description: 'Log text that means the worker has registered with LiveKit'
+    required: false
+    default: 'registered worker'
+  allow_unverified_agent_name:
+    description: 'Let a worker whose registration line does not report its agent name keep running. Only for workers you know read their name from agent_name_env (livekit-agents older than 1.6, or custom logging).'
+    required: false
+    default: 'false'
+  ready_timeout:
+    description: 'Seconds to wait for the worker to register'
+    required: false
+    default: '300'
+  container:
+    description: 'Container name; pass the same name to stop-worker'
+    required: false
+    default: 'cekura-livekit-worker'
+
+outputs:
+  agent_name:
+    description: 'The agent name the worker registered as. Pass it to run-suite as livekit_data.agent_name.'
+    value: ${{ steps.start.outputs.agent_name }}
+  container:
+    description: 'The worker container name'
+    value: ${{ steps.start.outputs.container }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build worker image
+      id: build
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        BUILD_CONTEXT: ${{ inputs.build_context }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+      run: |
+        set -euo pipefail
+        if [ -n "$IMAGE" ]; then
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        tag="cekura-livekit-preview:${GITHUB_SHA::12}"
+        docker build -t "$tag" -f "$BUILD_CONTEXT/$DOCKERFILE" "$BUILD_CONTEXT"
+        echo "image=$tag" >> "$GITHUB_OUTPUT"
+
+    - name: Start worker and wait for it to register
+      id: start
+      shell: bash
+      env:
+        IMAGE: ${{ steps.build.outputs.image }}
+        LIVEKIT_URL: ${{ inputs.livekit_url }}
+        LIVEKIT_API_KEY: ${{ inputs.livekit_api_key }}
+        LIVEKIT_API_SECRET: ${{ inputs.livekit_api_secret }}
+        AGENT_NAME_BASE: ${{ inputs.agent_name_base }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        AGENT_NAME_ENV: ${{ inputs.agent_name_env }}
+        WORKER_ENV: ${{ inputs.env }}
+        COMMAND: ${{ inputs.command }}
+        READY_PATTERN: ${{ inputs.ready_pattern }}
+        READY_TIMEOUT: ${{ inputs.ready_timeout }}
+        ALLOW_UNVERIFIED: ${{ inputs.allow_unverified_agent_name }}
+        CONTAINER: ${{ inputs.container }}
+      run: python3 "$GITHUB_ACTION_PATH/../worker.py" start

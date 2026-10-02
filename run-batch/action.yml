@@ -1,0 +1,83 @@
+name: 'Cekura Batch Run'
+description: 'Run many Cekura agent/scenario groups, including multi-leg groups whose calls must run at the same time, under one concurrency limit'
+author: 'Cekura'
+
+branding:
+  icon: 'layers'
+  color: 'blue'
+
+inputs:
+  api_key:
+    description: 'Cekura API key'
+    required: true
+  concurrency:
+    description: 'Maximum Cekura calls in flight across the whole batch. A set of legs counts as one call per leg'
+    required: true
+  batch:
+    description: 'The groups to run, as JSON or YAML (YAML needs PyYAML on the runner). See run-batch/README.md'
+    required: false
+  batch_file:
+    description: 'Path to a JSON or YAML file with the groups, instead of batch'
+    required: false
+  frequency:
+    description: 'Default number of times to run each scenario (or each set of legs); a group can override it'
+    required: false
+    default: '1'
+  execution_mode:
+    description: 'Default execution mode for groups: voice, text, livekit_v2, or pipecat_v2'
+    required: false
+    default: 'voice'
+  name:
+    description: 'Prefix for the Cekura result names (defaults to "GitHub run <run id>")'
+    required: false
+  timeout:
+    description: 'Timeout in seconds for the whole batch'
+    required: false
+    default: '3600'
+  share_links:
+    description: 'Create a 7-day shareable link for each result and link it from the job summary'
+    required: false
+    default: 'true'
+  dry_run:
+    description: 'Validate the batch and print the plan without starting any calls'
+    required: false
+    default: 'false'
+  api_url:
+    description: 'Cekura API URL'
+    required: false
+    default: 'https://api.cekura.ai'
+
+outputs:
+  passed:
+    description: '"true" when every group passed'
+    value: ${{ steps.run.outputs.passed }}
+  total_runs:
+    description: 'Total runs across all results'
+    value: ${{ steps.run.outputs.total_runs }}
+  passed_runs:
+    description: 'Runs that passed across all results'
+    value: ${{ steps.run.outputs.passed_runs }}
+  result_ids:
+    description: 'JSON list of the Cekura result IDs that were started'
+    value: ${{ steps.run.outputs.result_ids }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Cekura batch
+      id: run
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api_key }}
+        CONCURRENCY: ${{ inputs.concurrency }}
+        BATCH: ${{ inputs.batch }}
+        BATCH_FILE: ${{ inputs.batch_file }}
+        FREQUENCY: ${{ inputs.frequency }}
+        EXECUTION_MODE: ${{ inputs.execution_mode }}
+        NAME: ${{ inputs.name }}
+        TIMEOUT: ${{ inputs.timeout }}
+        SHARE_LINKS: ${{ inputs.share_links }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        API_URL: ${{ inputs.api_url }}
+      # exec so GitHub's cancellation signals reach Python directly.
+      run: exec python3 -u "$GITHUB_ACTION_PATH/run_batch.py"

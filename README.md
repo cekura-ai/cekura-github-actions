@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cekura Run Tests
-        uses: cekura-ai/cekura-github-actions@v1.2.1
+        uses: cekura-ai/cekura-github-actions@v1.2.3
         with:
           agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
           scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
@@ -80,7 +80,7 @@ Test specific scenarios by their IDs:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -93,7 +93,7 @@ Test all scenarios with specific tags:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     tags: ${{ vars.TAGS }}
@@ -106,7 +106,7 @@ Combine both approaches:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -120,7 +120,7 @@ When testing agents that make outbound calls:
 
 ```yaml
 - name: Run Cekura Tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -134,7 +134,7 @@ Set `execution_mode: text` to run scenarios as text/chat simulations instead of 
 
 ```yaml
 - name: Run text tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     tags: ${{ vars.TAGS }}
@@ -150,7 +150,7 @@ LiveKit runs use the agent's LiveKit credentials configured in Cekura. Pass scen
 
 ```yaml
 - name: Run LiveKit tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -168,7 +168,7 @@ Pipecat runs use the agent's Pipecat Cloud credentials configured in Cekura. As 
 
 ```yaml
 - name: Run Pipecat tests
-  uses: cekura-ai/cekura-github-actions@v1.2.1
+  uses: cekura-ai/cekura-github-actions@v1.2.3
   with:
     agent_id: ${{ vars.AGENT_ID }}
     scenario_ids: ${{ vars.SCENARIO_IDS }}
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@v1.2.1
+        uses: cekura-ai/cekura-github-actions@v1.2.3
         with:
           agent_id: ${{ inputs.agent_id || vars.AGENT_ID }}
           scenario_ids: ${{ inputs.scenario_ids || vars.SCENARIO_IDS }}
@@ -227,7 +227,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Cekura Tests
-        uses: cekura-ai/cekura-github-actions@v1.2.1
+        uses: cekura-ai/cekura-github-actions@v1.2.3
         with:
           agent_id: ${{ vars.AGENT_ID }}
           tags: 'regression'
@@ -244,7 +244,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Test Staging
-        uses: cekura-ai/cekura-github-actions@v1.2.1
+        uses: cekura-ai/cekura-github-actions@v1.2.3
         with:
           agent_id: ${{ vars.STAGING_AGENT_ID }}
           tags: 'smoke-test'
@@ -256,7 +256,7 @@ jobs:
     needs: staging-tests
     steps:
       - name: Test Production
-        uses: cekura-ai/cekura-github-actions@v1.2.1
+        uses: cekura-ai/cekura-github-actions@v1.2.3
         with:
           agent_id: ${{ vars.PROD_AGENT_ID }}
           tags: 'smoke-test'
@@ -280,6 +280,7 @@ All inputs for the action:
 | `phone_number` | Outbound phone number for testing | No | - |
 | `api_url` | Cekura API URL | No | `https://api.cekura.ai` |
 | `frequency` | Run each scenario N times | No | `1` |
+| `concurrency_limit` | Maximum calls Cekura runs at once for this result. Defaults to your organization's limit | No | - |
 | `timeout` | Timeout in seconds | No | `3600` |
 
 *Voice and text runs accept `scenario_ids`, `tags`, or both. LiveKit and Pipecat runs require `scenario_ids`; tags and `phone_number` are not supported.
@@ -300,6 +301,8 @@ The action polls every 30 seconds until the result reaches a terminal status: `c
 - **Success**: the result is `completed` and every run passed ✅
 - **Failure**: anything else exits with an error ❌ — a run that failed its checks, errored, never connected, or timed out counts as not passed, as does a result that ends `failed`, `timeout` or `cancelled`
 
+The job summary lists every run with its scenario, outcome and the reason it did not pass (error message or failed metrics), so you can see failures without opening Cekura.
+
 If the status check fails with a network error, `408`, `429` or `5xx`, the action tries up to 3 times, 10 seconds apart, before failing.
 
 If the action stops watching a result before it finishes, the job summary still shows the result ID and a shareable results link, and `result_id` / `result_url` are still set as outputs:
@@ -309,6 +312,18 @@ If the action stops watching a result before it finishes, the job summary still 
 - **Status checks keep failing**: the action fails but leaves the runs going, so they finish normally and stay visible in Cekura.
 
 This ensures your CI/CD pipeline correctly reflects the state of your agent tests.
+
+## Running many groups under one concurrency limit
+
+To run several agents' scenarios from one step under a single `concurrency` limit, including calls that need two or more legs running at the same time (transfers, 3-way calls), use the batch action. For the input format, see **[run-batch/README.md](run-batch/README.md)**.
+
+```yaml
+- uses: cekura-ai/cekura-github-actions/run-batch@v1.2.3
+  with:
+    api_key: ${{ secrets.CEKURA_API_KEY }}
+    concurrency: 10
+    batch_file: .github/cekura-batch.yml
+```
 
 ## Complete Documentation
 

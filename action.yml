@@ -39,6 +39,9 @@ inputs:
     description: 'Number of times to run each scenario'
     required: false
     default: '1'
+  concurrency_limit:
+    description: 'Maximum calls Cekura runs at once for this result (defaults to the organization limit)'
+    required: false
   timeout:
     description: 'Timeout in seconds'
     required: false
@@ -74,6 +77,7 @@ runs:
         PHONE_NUMBER: ${{ inputs.phone_number }}
         NAME: ${{ inputs.name }}
         FREQUENCY: ${{ inputs.frequency }}
+        CONCURRENCY_LIMIT: ${{ inputs.concurrency_limit }}
         TIMEOUT: ${{ inputs.timeout }}
       run: |
         set -e
@@ -249,6 +253,16 @@ runs:
         echo "  API URL: $API_URL"
         echo ""
 
+        if [ -n "$CONCURRENCY_LIMIT" ]; then
+          case "$CONCURRENCY_LIMIT" in
+            ''|*[!0-9]*|0*)
+              echo "Error: concurrency_limit must be a positive integer."
+              exit 1
+              ;;
+          esac
+          echo "  Concurrency Limit: $CONCURRENCY_LIMIT"
+        fi
+
         if [ -n "$WEBSOCKET_URL" ] && [ "$EXECUTION_MODE" != "text" ]; then
           echo "Error: websocket_url is only valid for text runs."
           exit 1
@@ -362,6 +376,10 @@ runs:
             exit 1
             ;;
         esac
+
+        if [ -n "$CONCURRENCY_LIMIT" ]; then
+          PAYLOAD="${PAYLOAD%\}},\"concurrency_limit\":${CONCURRENCY_LIMIT}}"
+        fi
 
         echo ""
         echo "Starting test execution..."
@@ -545,6 +563,49 @@ runs:
           echo "- Did Not Pass: $NOT_PASSED_RUNS" >> $GITHUB_STEP_SUMMARY
           echo "- Success Rate: ${SUCCESS_RATE}%" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # One row per run, so failures are visible without opening Cekura.
+          RUNS_TABLE=$(printf '%s' "$STATUS_BODY" | python3 -c '
+        import json, sys
+        data = json.load(sys.stdin)
+        names = {s.get("id"): s.get("name") for s in data.get("scenarios") or [] if isinstance(s, dict)}
+        runs = data.get("runs") or []
+        runs = list(runs.values()) if isinstance(runs, dict) else list(runs)
+        def label(run):
+            scenario = run.get("scenario")
+            if isinstance(scenario, dict):
+                return scenario.get("name") or "scenario %s" % scenario.get("id")
+            return run.get("scenario_name") or names.get(scenario) or "scenario %s" % scenario
+        def failing_metrics(run):
+            found = []
+            expected = run.get("expected_outcome")
+            if isinstance(expected, dict) and isinstance(expected.get("score"), (int, float)) and expected["score"] < 100:
+                found.append("expected outcome")
+            for metric in (run.get("evaluation") or {}).get("metrics") or []:
+                if (isinstance(metric, dict) and str(metric.get("type", "")).startswith("binary")
+                        and metric.get("score") == 0 and metric.get("name")):
+                    found.append(metric["name"])
+            return found
+        def outcome(run):
+            status = run.get("status")
+            if status != "completed":
+                return "❌ %s" % status, (run.get("error_message") or "run ended %s" % status)
+            if run.get("success"):
+                return "✅ pass", ""
+            found = failing_metrics(run)
+            return "❌ fail", ("failed: " + ", ".join(found)) if found else "failed its checks"
+        if runs:
+            print("| Run | Scenario | Result | Why |")
+            print("|---|---|---|---|")
+            for run in sorted(runs, key=lambda r: (label(r), r.get("id") or 0)):
+                mark, reason = outcome(run)
+                reason = str(reason).strip().replace("|", "\\|").replace("\n", " ")[:300]
+                print("| %s | %s | %s | %s |" % (run.get("id"), str(label(run)).replace("|", "\\|"), mark, reason))
+        ' 2>/dev/null) || RUNS_TABLE=""
+          if [ -n "$RUNS_TABLE" ]; then
+            echo "$RUNS_TABLE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
 
           publish_result_link 15
 

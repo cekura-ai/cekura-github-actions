@@ -313,6 +313,18 @@ If the action stops watching a result before it finishes, the job summary still 
 
 This ensures your CI/CD pipeline correctly reflects the state of your agent tests.
 
+## Running many groups under one concurrency limit
+
+To run several agents' scenarios, or member/contact pairs for 3-way calls, from one step under a single `concurrency` limit, use the batch action. For the input format, see **[run-batch/README.md](run-batch/README.md)**.
+
+```yaml
+- uses: cekura-ai/cekura-github-actions/run-batch@v1.3.0
+  with:
+    api_key: ${{ secrets.CEKURA_API_KEY }}
+    concurrency: 10
+    batch_file: .github/cekura-batch.yml
+```
+
 ## Complete Documentation
 
 For a comprehensive guide including:

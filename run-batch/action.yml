@@ -1,5 +1,5 @@
 name: 'Cekura Batch Run'
-description: 'Run many Cekura agent/scenario groups, including member/contact pairs for 3-way calls, under one concurrency limit'
+description: 'Run many Cekura agent/scenario groups, including multi-leg groups whose calls must run at the same time, under one concurrency limit'
 author: 'Cekura'
 
 branding:
@@ -11,7 +11,7 @@ inputs:
     description: 'Cekura API key'
     required: true
   concurrency:
-    description: 'Maximum Cekura calls in flight across the whole batch. A member/contact pair counts as 2'
+    description: 'Maximum Cekura calls in flight across the whole batch. A set of legs counts as one call per leg'
     required: true
   batch:
     description: 'The groups to run, as JSON or YAML (YAML needs PyYAML on the runner). See run-batch/README.md'
@@ -20,7 +20,7 @@ inputs:
     description: 'Path to a JSON or YAML file with the groups, instead of batch'
     required: false
   frequency:
-    description: 'Default number of times to run each scenario (or pair); a group can override it'
+    description: 'Default number of times to run each scenario (or each set of legs); a group can override it'
     required: false
     default: '1'
   execution_mode:

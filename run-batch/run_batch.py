@@ -5,11 +5,11 @@ Invoked by run-batch/action.yml; every input arrives as an environment
 variable. Standard library only; a YAML batch also needs PyYAML.
 
 A batch is a list of groups. A group either runs one agent's scenarios
-(`scenario_ids`, or a single `member` / `contact` side), or a 3-way call
-pair (`member` and `contact`): member scenario i and contact scenario i are
-started together, each as its own Cekura result. A group is started only
-when its calls fit in the remaining `concurrency`, so the calls in flight
-never exceed it.
+(`agent_id` + `scenario_ids`) as one Cekura result, or lists two or more
+`legs` that must run at the same time (e.g. a caller and a transfer target):
+scenario i of every leg is started together, each leg as its own Cekura
+result. A group is started only when its calls fit in the remaining
+`concurrency`, so the calls in flight never exceed it.
 """
 
 import datetime
@@ -39,10 +39,10 @@ ENDPOINTS = {
 TERMINAL = {"completed", "failed", "timeout", "cancelled"}
 MAX_POLL_FAILURES = 7
 TRANSIENT = (urllib.error.URLError, OSError, http.client.HTTPException, ValueError)
-SIDE_KEYS = {"agent_id", "scenario_ids", "execution_mode", "phone_number", "websocket_url",
-             "livekit_data", "pipecat_data"}
-GROUP_KEYS = SIDE_KEYS | {"name", "frequency", "member", "contact"}
-ROLES = ("member", "contact")
+RUN_KEYS = {"agent_id", "scenario_ids", "execution_mode", "phone_number", "websocket_url",
+            "livekit_data", "pipecat_data"}
+LEG_KEYS = RUN_KEYS | {"name"}
+GROUP_KEYS = RUN_KEYS | {"name", "frequency", "legs"}
 
 
 class Failure(Exception):
@@ -131,12 +131,13 @@ def provider_data(value, where):
     return value
 
 
-def build_side(raw, defaults, where, cfg):
+def build_side(raw, defaults, where, cfg, allowed=RUN_KEYS):
+    """Validate one agent + scenario list (a single-agent group or one leg)."""
     if not isinstance(raw, dict):
         raise Failure(f"{where} must be a mapping with agent_id and scenario_ids.")
-    unknown = set(raw) - SIDE_KEYS
+    unknown = set(raw) - allowed
     if unknown:
-        raise Failure(f"{where} has unknown key(s) {sorted(unknown)}; allowed: {sorted(SIDE_KEYS)}.")
+        raise Failure(f"{where} has unknown key(s) {sorted(unknown)}; allowed: {sorted(allowed)}.")
     side = {**defaults, **raw}
     if "agent_id" not in side:
         raise Failure(f"{where}.agent_id is required.")
@@ -176,9 +177,9 @@ def build_payload(side, scenario_ids, frequency, name, concurrency_limit):
 class Launch:
     """One Cekura result started by the batch."""
 
-    def __init__(self, group, call, side, scenario_ids, frequency, slots, name):
+    def __init__(self, group, leg, side, scenario_ids, frequency, slots, name):
         self.group = group
-        self.call = call
+        self.leg = leg
         self.mode = side["mode"]
         self.endpoint = ENDPOINTS[side["mode"]]
         self.slots = slots
@@ -190,6 +191,10 @@ class Launch:
         self.url = None
         self.error = ""
         self.poll_failures = 0
+
+    @property
+    def title(self):
+        return f"{self.group} · {self.leg}" if self.leg else self.group
 
     @property
     def total(self):
@@ -205,7 +210,7 @@ class Launch:
 
 
 class Unit:
-    """Launches that start together: one group, or one member/contact pair."""
+    """Launches that start together: a single-agent group, or one set of legs."""
 
     def __init__(self, group, launches):
         self.group = group
@@ -228,36 +233,43 @@ def plan(groups, cfg, concurrency):
         if group.get("name"):
             where = f"group {name!r}"
         frequency = positive_int(group.get("frequency", default_frequency), f"{where}.frequency")
-        defaults = {k: group[k] for k in SIDE_KEYS - {"scenario_ids"} if k in group}
-        roles = [r for r in ROLES if r in group]
-        if roles and "scenario_ids" in group:
-            raise Failure(f"{where}: put scenario_ids under {' / '.join(roles)}, not on the group.")
 
-        if len(roles) < 2:
-            call = roles[0] if roles else "scenarios"
-            raw = group[call] if roles else {k: group[k] for k in SIDE_KEYS if k in group}
-            side = build_side(raw, defaults if roles else {}, f"{where}.{call}" if roles else where, cfg)
-            calls = len(side["scenario_ids"]) * frequency
-            slots = min(calls, concurrency)
-            units.append(Unit(name, [Launch(name, call, side, side["scenario_ids"], frequency, slots,
-                                            f"{cfg.name} · {name}" + (f" · {call}" if roles else ""))]))
+        if "legs" not in group:
+            side = build_side({k: group[k] for k in RUN_KEYS if k in group}, {}, where, cfg)
+            slots = min(len(side["scenario_ids"]) * frequency, concurrency)
+            units.append(Unit(name, [Launch(name, "", side, side["scenario_ids"], frequency, slots,
+                                            f"{cfg.name} · {name}")]))
             continue
 
-        member = build_side(group["member"], defaults, f"{where}.member", cfg)
-        contact = build_side(group["contact"], defaults, f"{where}.contact", cfg)
-        if len(member["scenario_ids"]) != len(contact["scenario_ids"]):
+        if "scenario_ids" in group:
+            raise Failure(f"{where}: put scenario_ids on each leg, not on the group.")
+        raw_legs = group["legs"]
+        if not isinstance(raw_legs, list) or len(raw_legs) < 2:
+            raise Failure(f"{where}.legs must list at least 2 legs; for one agent, put agent_id and "
+                          "scenario_ids on the group instead.")
+        defaults = {k: group[k] for k in RUN_KEYS - {"scenario_ids"} if k in group}
+        legs = []
+        for n, raw in enumerate(raw_legs, 1):
+            leg_name = str(raw.get("name") or f"leg {n}") if isinstance(raw, dict) else f"leg {n}"
+            legs.append((leg_name, build_side(raw, defaults, f"{where}.legs[{n}]", cfg, LEG_KEYS)))
+        names = [leg_name for leg_name, _ in legs]
+        if len(set(names)) != len(names):
+            raise Failure(f"{where}: leg names must be unique, got {names}.")
+        counts = {leg_name: len(leg["scenario_ids"]) for leg_name, leg in legs}
+        if len(set(counts.values())) != 1:
             raise Failure(
-                f"{where}: member has {len(member['scenario_ids'])} scenario(s) and contact has "
-                f"{len(contact['scenario_ids'])}; pairs are matched by position, so the counts must "
-                "match (repeat a scenario ID to reuse it).")
-        if concurrency < 2:
-            raise Failure(f"{where} is a member/contact pair, which needs concurrency of at least 2.")
-        for i, (m_id, c_id) in enumerate(zip(member["scenario_ids"], contact["scenario_ids"]), 1):
+                f"{where}: legs have different scenario counts {counts}; legs are matched by position, "
+                "so every leg needs the same number (repeat a scenario ID to reuse it).")
+        if len(legs) > concurrency:
+            raise Failure(f"{where} has {len(legs)} legs that run at the same time, which needs "
+                          f"concurrency of at least {len(legs)}.")
+        for i in range(next(iter(counts.values()))):
             for rep in range(1, frequency + 1):
-                label = f"pair {i}" + (f" #{rep}" if frequency > 1 else "")
+                label = f"set {i + 1}" + (f" #{rep}" if frequency > 1 else "")
                 units.append(Unit(name, [
-                    Launch(name, f"{label} · {role}", side, [sid], 1, 1, f"{cfg.name} · {name} · {label} · {role}")
-                    for role, side, sid in (("member", member, m_id), ("contact", contact, c_id))
+                    Launch(name, f"{label} · {leg_name}", leg, [leg["scenario_ids"][i]], 1, 1,
+                           f"{cfg.name} · {name} · {label} · {leg_name}")
+                    for leg_name, leg in legs
                 ]))
     return units
 
@@ -348,13 +360,13 @@ class Batch:
         for launch in unit.launches:
             if any(other.status in ("start failed", "not started") for other in unit.launches):
                 launch.status = "not started"
-                launch.error = "the other side of the pair failed to start"
+                launch.error = "another leg in this set failed to start"
                 continue
             self.start(launch)
         if any(launch.status == "start failed" for launch in unit.launches):
             for launch in unit.launches:
                 if launch.result_id and launch in self.active:
-                    launch.error = "ended: the other side of the pair failed to start"
+                    launch.error = "ended: another leg in this set failed to start"
                     self.end_calls(launch)
 
     def start(self, launch):
@@ -377,10 +389,10 @@ class Batch:
                 launch.status = "start failed"
                 launch.error = f"Cekura returned no result id: {json.dumps(started)[:300]}"
         if launch.result_id:
-            print(f"▶ {launch.group} · {launch.call}: result {launch.result_id} "
+            print(f"▶ {launch.title}: result {launch.result_id} "
                   f"({launch.slots} call(s); {self.in_flight}/{self.concurrency} in flight)")
         else:
-            print(f"✖ {launch.group} · {launch.call}: could not start — {launch.error}")
+            print(f"✖ {launch.title}: could not start — {launch.error}")
 
     def poll_active(self):
         for launch in list(self.active):
@@ -402,7 +414,7 @@ class Batch:
                 launch.status = result["status"]
                 self.active.remove(launch)
                 self.in_flight -= launch.slots
-                print(f"■ {launch.group} · {launch.call}: result {launch.result_id} {launch.status}, "
+                print(f"■ {launch.title}: result {launch.result_id} {launch.status}, "
                       f"{launch.passed_runs}/{launch.total} passed")
 
     def end_calls(self, launch, timeout=5):
@@ -481,19 +493,19 @@ class Batch:
             f"- Runs passed: {passed}/{total}",
             f"- Concurrency: {self.concurrency} call(s)",
             f"- Duration: {elapsed // 60}m {elapsed % 60}s", "",
-            "| Group | Call | Result | Status | Passed |", "|---|---|---|---|---|",
+            "| Group | Leg | Result | Status | Passed |", "|---|---|---|---|---|",
         ]
         for group, ls in groups:
             for launch in ls:
                 rid = launch.result_id or "—"
                 ref = f"[{rid}]({launch.url})" if launch.url else str(rid)
                 mark = "✅" if launch.passed else "❌"
-                lines.append(f"| {cell(group)} | {cell(launch.call)} | {ref} | {mark} {cell(launch.status)} | "
+                lines.append(f"| {cell(group)} | {cell(launch.leg or "—")} | {ref} | {mark} {cell(launch.status)} | "
                              f"{launch.passed_runs}/{launch.total} |")
         problems = []
         for launch in launches:
             if launch.error:
-                problems.append(f"| {cell(launch.group)} | {cell(launch.call)} | — | — | {cell(launch.error)} |")
+                problems.append(f"| {cell(launch.group)} | {cell(launch.leg or "—")} | — | — | {cell(launch.error)} |")
             runs = (launch.result or {}).get("runs") or {}
             runs = list(runs.values()) if isinstance(runs, dict) else list(runs)
             names = {s.get("id"): s.get("name") for s in (launch.result or {}).get("scenarios") or []
@@ -506,10 +518,10 @@ class Batch:
                 scenario = r.get("scenario")
                 label = (scenario.get("name") if isinstance(scenario, dict) else None) or r.get("scenario_name") \
                     or names.get(scenario) or f"scenario {scenario}"
-                problems.append(f"| {cell(launch.group)} | {cell(launch.call)} | {r.get('id')} | {cell(label)} | "
+                problems.append(f"| {cell(launch.group)} | {cell(launch.leg or "—")} | {r.get('id')} | {cell(label)} | "
                                 f"{cell(run_reason(r))} |")
         if problems:
-            lines += ["", "### Did not pass", "", "| Group | Call | Run | Scenario | Why |",
+            lines += ["", "### Did not pass", "", "| Group | Leg | Run | Scenario | Why |",
                       "|---|---|---|---|---|", *problems]
         return ok, total, passed, "\n".join(lines) + "\n"
 
@@ -544,7 +556,7 @@ def describe(units, concurrency):
     for unit in units:
         for launch in unit.launches:
             ids = ",".join(str(s["scenario"] if isinstance(s, dict) else s) for s in launch.payload["scenarios"])
-            lines.append(f"  {launch.group} · {launch.call}: agent "
+            lines.append(f"  {launch.title}: agent "
                          f"{launch.payload.get('agent_id', launch.payload.get('agent'))}, {launch.mode}, "
                          f"scenarios [{ids}] x{launch.payload['frequency']}, {launch.slots} call slot(s)")
     return "\n".join(lines)

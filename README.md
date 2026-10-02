@@ -315,7 +315,7 @@ This ensures your CI/CD pipeline correctly reflects the state of your agent test
 
 ## Running many groups under one concurrency limit
 
-To run several agents' scenarios, or member/contact pairs for 3-way calls, from one step under a single `concurrency` limit, use the batch action. For the input format, see **[run-batch/README.md](run-batch/README.md)**.
+To run several agents' scenarios from one step under a single `concurrency` limit, including calls that need two or more legs running at the same time (transfers, 3-way calls), use the batch action. For the input format, see **[run-batch/README.md](run-batch/README.md)**.
 
 ```yaml
 - uses: cekura-ai/cekura-github-actions/run-batch@v1.2.3

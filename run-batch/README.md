@@ -3,7 +3,7 @@
 Run many agent/scenario groups from one step, with one `concurrency` limit for the whole batch. It also supports member/contact pairs for 3-way calls. You no longer need GitHub matrices or separate jobs per batch to stay under your Cekura concurrency.
 
 ```yaml
-- uses: cekura-ai/cekura-github-actions/run-batch@v1.3.0
+- uses: cekura-ai/cekura-github-actions/run-batch@v1.2.3
   with:
     api_key: ${{ secrets.CEKURA_API_KEY }}
     concurrency: ${{ inputs.concurrency || 10 }}

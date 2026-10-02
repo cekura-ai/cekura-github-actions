@@ -583,7 +583,7 @@ runs:
                 found.append("expected outcome")
             for metric in (run.get("evaluation") or {}).get("metrics") or []:
                 if (isinstance(metric, dict) and str(metric.get("type", "")).startswith("binary")
-                        and metric.get("score") == 0 and metric.get("name")):
+                        and metric.get("score_normalized", metric.get("score")) == 0 and metric.get("name")):
                     found.append(metric["name"])
             return found
         def outcome(run):

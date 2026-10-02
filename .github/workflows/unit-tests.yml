@@ -1,0 +1,21 @@
+name: Unit tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The run-suite, preview and worker scripts are standard-library only;
+      # the worker tests use the runner's Docker.
+      - run: python -m unittest discover -s tests -v

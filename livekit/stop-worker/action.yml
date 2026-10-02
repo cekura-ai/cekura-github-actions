@@ -1,0 +1,18 @@
+name: "Cekura LiveKit Preview Worker Stop"
+description: "Print the preview worker's logs and remove its container. Run it with if: always()."
+author: "Cekura AI"
+
+inputs:
+  container:
+    description: 'Container name given to start-worker'
+    required: false
+    default: 'cekura-livekit-worker'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Stop worker
+      shell: bash
+      env:
+        CONTAINER: ${{ inputs.container }}
+      run: python3 "$GITHUB_ACTION_PATH/../worker.py" stop

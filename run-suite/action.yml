@@ -1,0 +1,97 @@
+name: "Cekura Run Suite"
+description: "Run a committed Cekura Tests-as-Code suite (cekura.tests.json) and fail the job unless every run passes"
+author: "Cekura AI"
+
+inputs:
+  api_key:
+    description: 'Cekura API key'
+    required: true
+  agent_id:
+    description: 'Cekura agent ID to run the suite against. The suite file never names an agent.'
+    required: true
+  spec:
+    description: 'Path to the suite file'
+    required: false
+    default: 'cekura.tests.json'
+  execution_mode:
+    description: 'Channel: voice, text, elevenlabs, pipecat_v2, or livekit_v2'
+    required: false
+    default: 'voice'
+  pipecat_data:
+    description: 'JSON overrides for pipecat_v2 runs: pipecat_agent_name, config, room_properties. Point a run at a preview deployment with {"pipecat_agent_name": "my-bot-pr-42"}.'
+    required: false
+  livekit_data:
+    description: 'JSON overrides for livekit_v2 runs: agent_name, url, config'
+    required: false
+  dry_run:
+    description: 'Validate and price the suite without placing calls or spending credit'
+    required: false
+    default: 'false'
+  name:
+    description: 'Name for this run in Cekura'
+    required: false
+  frequency:
+    description: 'Multiply every case''s frequency by N'
+    required: false
+  concurrency_limit:
+    description: 'Maximum calls in flight at once'
+    required: false
+  share_link:
+    description: 'Create a 7-day shareable results link (result_url) and put it in the summary. Anyone with the link can read the transcripts, so set false on public repositories.'
+    required: false
+    default: 'true'
+  api_url:
+    description: 'Cekura API URL'
+    required: false
+    default: 'https://api.cekura.ai'
+  timeout:
+    description: 'Seconds to wait for the suite to finish'
+    required: false
+    default: '3600'
+
+outputs:
+  result_id:
+    description: 'Cekura result ID (set as soon as the run starts)'
+    value: ${{ steps.run.outputs.result_id }}
+  result_url:
+    description: 'Shareable link to the results (valid for 7 days)'
+    value: ${{ steps.run.outputs.result_url }}
+  passed:
+    description: 'true only when the result completed and every run passed'
+    value: ${{ steps.run.outputs.passed }}
+  total_runs:
+    description: 'Number of runs in the result'
+    value: ${{ steps.run.outputs.total_runs }}
+  success_runs:
+    description: 'Number of runs that passed'
+    value: ${{ steps.run.outputs.success_runs }}
+  valid:
+    description: 'Dry runs only: whether Cekura accepted the suite'
+    value: ${{ steps.run.outputs.valid }}
+  summary_file:
+    description: 'Markdown summary of the run, e.g. for a pull request comment'
+    value: ${{ steps.run.outputs.summary_file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run Cekura suite
+      id: run
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api_key }}
+        AGENT_ID: ${{ inputs.agent_id }}
+        SPEC: ${{ inputs.spec }}
+        EXECUTION_MODE: ${{ inputs.execution_mode }}
+        PIPECAT_DATA: ${{ inputs.pipecat_data }}
+        LIVEKIT_DATA: ${{ inputs.livekit_data }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        SHARE_LINK: ${{ inputs.share_link }}
+        NAME: ${{ inputs.name }}
+        FREQUENCY: ${{ inputs.frequency }}
+        CONCURRENCY_LIMIT: ${{ inputs.concurrency_limit }}
+        API_URL: ${{ inputs.api_url }}
+        TIMEOUT: ${{ inputs.timeout }}
+      # exec, so the cancellation signal GitHub sends to the step's shell
+      # reaches the runner, which then ends the active Cekura calls.
+      run: exec python3 -u "$GITHUB_ACTION_PATH/run_suite.py"

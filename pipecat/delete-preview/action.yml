@@ -1,0 +1,37 @@
+name: "Cekura Pipecat Preview Delete"
+description: "Delete the <base>-pr-<number> preview agent from your Pipecat Cloud org. A preview that is already gone counts as deleted."
+author: "Cekura AI"
+
+inputs:
+  api_key:
+    description: 'Pipecat Cloud PRIVATE API key for your org (a repository secret)'
+    required: true
+  agent_name_base:
+    description: 'Base agent name; deletes <base>-pr-<number> only, never the base agent'
+    required: true
+  pr_number:
+    description: 'Pull request number used in the preview name'
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  api_url:
+    description: 'Pipecat Cloud API URL'
+    required: false
+    default: 'https://api.pipecat.daily.co'
+
+outputs:
+  deleted:
+    description: 'true when a preview existed and was deleted'
+    value: ${{ steps.delete.outputs.deleted }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Delete preview agent
+      id: delete
+      shell: bash
+      env:
+        PIPECAT_API_KEY: ${{ inputs.api_key }}
+        PIPECAT_API_URL: ${{ inputs.api_url }}
+        AGENT_NAME_BASE: ${{ inputs.agent_name_base }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+      run: python3 "$GITHUB_ACTION_PATH/../preview.py" delete

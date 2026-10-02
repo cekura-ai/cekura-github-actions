@@ -72,6 +72,42 @@ jobs:
 
 Commit and push your workflow file. The action will run automatically on the next push or pull request.
 
+## Test pull requests on a preview deployment
+
+Label a pull request, and a workflow deploys that pull request's bot to your own
+Pipecat Cloud org (or runs its LiveKit worker in the job) under its own name,
+runs your committed `cekura.tests.json` against it, comments the result, and
+removes it. Your production agent is never deployed over or dialled.
+
+```yaml
+- id: preview
+  uses: cekura-ai/cekura-github-actions/pipecat/deploy-preview@v1.3.0
+  with:
+    api_key: ${{ secrets.PIPECAT_CLOUD_API_KEY }}
+    agent_name_base: my-bot
+    secret_set: my-bot-ci
+    spec: cekura.tests.json
+
+- uses: cekura-ai/cekura-github-actions/run-suite@v1.3.0
+  with:
+    api_key: ${{ secrets.CEKURA_API_KEY }}
+    agent_id: ${{ vars.CEKURA_AGENT_ID }}
+    spec: cekura.tests.json
+    execution_mode: pipecat_v2
+    pipecat_data: '{"pipecat_agent_name": "${{ steps.preview.outputs.agent_name }}"}'
+
+- if: always()
+  uses: cekura-ai/cekura-github-actions/pipecat/delete-preview@v1.3.0
+  with:
+    api_key: ${{ secrets.PIPECAT_CLOUD_API_KEY }}
+    agent_name_base: my-bot
+```
+
+Full Pipecat and LiveKit workflows, prerequisites and inputs:
+**[docs/preview-deployments.md](docs/preview-deployments.md)**. These are
+separate actions in this repository; the action above (`cekura-ai/cekura-github-actions`)
+is unchanged.
+
 ## Usage Examples
 
 ### Using Scenario IDs
